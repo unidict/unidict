@@ -25,6 +25,50 @@
 #endif
 
 // ============================================================
+// PATH_MAX
+// ============================================================
+// POSIX defines PATH_MAX in <limits.h>. MSVC's <limits.h> lacks it.
+#ifdef _MSC_VER
+#include <limits.h>
+#ifndef PATH_MAX
+#define PATH_MAX _MAX_PATH
+#endif
+#endif
+
+// ============================================================
+// S_ISDIR / S_ISREG
+// ============================================================
+// POSIX defines these as macros in <sys/stat.h>. MSVC's <sys/stat.h>
+// provides _S_IFDIR / _S_IFREG but not the S_IS* convenience macros.
+#ifdef _MSC_VER
+#include <sys/stat.h>
+#ifndef S_ISDIR
+#define S_ISDIR(m)  (((m) & _S_IFMT) == _S_IFDIR)
+#endif
+#ifndef S_ISREG
+#define S_ISREG(m)  (((m) & _S_IFMT) == _S_IFREG)
+#endif
+#endif
+
+// ============================================================
+// strndup
+// ============================================================
+// POSIX function; MSVC only has strdup (_strdup). Provide a static
+// inline implementation backed by the C runtime allocator.
+#ifdef _MSC_VER
+#include <string.h>
+static inline char *ud_strndup(const char *s, size_t n) {
+    size_t len = strnlen_s(s, n);
+    char *p = (char *)malloc(len + 1);
+    if (!p) return NULL;
+    memcpy(p, s, len);
+    p[len] = '\0';
+    return p;
+}
+#define strndup ud_strndup
+#endif
+
+// ============================================================
 // Directory iteration (dirent)
 // ============================================================
 // MSVC has no <dirent.h>. Provide a minimal, allocation-safe wrapper

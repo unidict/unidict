@@ -367,7 +367,8 @@ static unidict_status ud_udx_info_get(unidict *dict, unidict_info **out_info) {
     }
 
     info->format = dict->format;
-    info->title = strdup(udx_db_get_name(udx->article_db) ?: "UDX Dictionary");
+    const char *name = udx_db_get_name(udx->article_db);
+    info->title = strdup(name ? name : "UDX Dictionary");
     info->word_count = (uint64_t)udx_db_get_item_count(udx->article_db);
 
     *out_info = info;
@@ -455,7 +456,7 @@ static unidict_status ud_udx_entry_lookup(unidict *dict, const char *key, unidic
         return UNIDICT_ERR_NOMEM;
     }
 
-    entry->key = strdup(wrapper->key_entry->items.elements[0].original_key ?: "");
+    entry->key = strdup(wrapper->key_entry->items.elements[0].original_key ? wrapper->key_entry->items.elements[0].original_key : "");
     entry->internal_entry = &wrapper->obj;
 
     unidict_entry_array *entries = malloc(sizeof(unidict_entry_array));
@@ -539,7 +540,7 @@ static unidict_status ud_udx_suggest(unidict *dict, const char *prefix, size_t l
             break;
         }
 
-        entry->key = strdup(wrapper->key_entry->items.elements[0].original_key ?: "");
+        entry->key = strdup(wrapper->key_entry->items.elements[0].original_key ? wrapper->key_entry->items.elements[0].original_key : "");
         entry->internal_entry = &wrapper->obj;
         res->items[i] = entry;
     }
@@ -622,7 +623,7 @@ static unidict_status ud_udx_entry_iter_next(unidict_entry_iter *iter, unidict_e
         iter->current.internal_entry = NULL;
     }
 
-    iter->current.key = strdup(udx_entry->items.elements[0].original_key ?: "");
+    iter->current.key = strdup(udx_entry->items.elements[0].original_key ? udx_entry->items.elements[0].original_key : "");
     if (!iter->current.key) {
         *out_entry = NULL;
         return UNIDICT_ERR_NOMEM;
@@ -758,7 +759,7 @@ static unidict_status ud_udx_resource_iter_next(unidict_resource_iter *iter, uni
         return UNIDICT_DONE;
     }
 
-    const char *key = entry->items.elements[0].original_key ?: "";
+    const char *key = entry->items.elements[0].original_key ? entry->items.elements[0].original_key : "";
     iter->current.key = strdup(key);
     if (!iter->current.key) {
         *out_res = NULL;
