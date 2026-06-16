@@ -17,7 +17,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef _MSC_VER
+#include "ud_compat.h"
+#else
+#include <strings.h>
 #include <dirent.h>
+#endif
 #include <sys/stat.h>
 #include <limits.h>
 #include <errno.h>

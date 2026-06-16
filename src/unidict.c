@@ -22,10 +22,13 @@
 
 #include <stdlib.h>
 #include <string.h>
+#ifdef _MSC_VER
+#include "ud_compat.h"   // strcasecmp on Windows (no <strings.h>)
+#else
 #include <strings.h>
+#endif
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <dirent.h>
 #include <limits.h>
 
 // ============================================================

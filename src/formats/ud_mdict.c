@@ -12,9 +12,13 @@
 #include "ud_udx.h"
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <ctype.h>
+#ifdef _MSC_VER
+#include "ud_compat.h"
+#else
+#include <strings.h>
 #include <dirent.h>
+#endif
 #include <sys/stat.h>
 #include <iconv.h>
 #include <errno.h>

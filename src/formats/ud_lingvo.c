@@ -14,6 +14,11 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#ifdef _MSC_VER
+#include "ud_compat.h"
+#else
+#include <strings.h>
+#endif
 
 // ============================================================
 // Struct definition
