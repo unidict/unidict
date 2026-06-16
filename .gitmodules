@@ -1,0 +1,30 @@
+[submodule "deps/udx"]
+	path = deps/udx
+	url = https://github.com/kejinlu/udx.git
+[submodule "deps/ebcore"]
+	path = deps/ebcore
+	url = https://github.com/unidict/ebcore.git
+[submodule "deps/cmdx"]
+	path = deps/cmdx
+	url = https://github.com/unidict/cmdx.git
+[submodule "deps/stardict"]
+	path = deps/stardict
+	url = https://github.com/unidict/stardict.git
+[submodule "deps/lsd"]
+	path = deps/lsd
+	url = https://github.com/unidict/lsd.git
+[submodule "deps/dictzip"]
+	path = deps/dictzip
+	url = https://github.com/unidict/dictzip.git
+[submodule "deps/bgl"]
+	path = deps/bgl
+	url = https://github.com/unidict/bgl.git
+[submodule "deps/uobject"]
+	path = deps/uobject
+	url = https://github.com/unidict/uobject.git
+[submodule "deps/czim"]
+	path = deps/czim
+	url = https://github.com/unidict/czim.git
+[submodule "deps/ldx"]
+	path = deps/ldx
+	url = git@github.com:unidict/ldx.git

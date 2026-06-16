@@ -1,0 +1,12 @@
+/tmp
+*.o
+*.a
+*.so
+.DS_Store
+/.claude
+xcuserdata/
+/build
+/build-cmake/
+
+# Stale standalone test binary (superseded by CMake/Xcode test targets)
+/udidx_test
