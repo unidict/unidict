@@ -82,11 +82,19 @@ jobs:
         if: runner.os == 'Windows'
         run: vcpkg install zlib:x64-windows libxml2:x64-windows zstd:x64-windows liblzma:x64-windows icu:x64-windows libvorbis:x64-windows libunistring:x64-windows
 
-      - name: Configure
+      - name: Configure (Linux, ASan for crash diagnosis)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build -DUNIDICT_BUILD_TESTS=ON \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+                -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+
+      - name: Configure (macOS / Windows)
+        if: runner.os != 'Linux'
         run: >
           cmake -B build -DUNIDICT_BUILD_TESTS=ON
           ${{ runner.os == 'Windows' && '-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake' || '' }}
-          ${{ runner.os == 'Linux' && '-DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS=-fsanitize=address -fno-omit-frame-pointer -g -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address' || '' }}
 
       - name: Build
         run: cmake --build build --config Release
