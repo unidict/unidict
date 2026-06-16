@@ -561,7 +561,7 @@ static unidict_status mdict_info_get(unidict *dict, unidict_info **out_info) {
         return UNIDICT_OK;
     }
 
-    unidict_info *res = malloc(sizeof(unidict_info));
+    unidict_info *res = calloc(1, sizeof(unidict_info));
     if (!res) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;

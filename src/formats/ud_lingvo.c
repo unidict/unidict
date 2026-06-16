@@ -232,7 +232,7 @@ static unidict_status lingvo_info_get(unidict *dict, unidict_info **out_info) {
         return UNIDICT_OK;
     }
 
-    unidict_info *result = malloc(sizeof(unidict_info));
+    unidict_info *result = calloc(1, sizeof(unidict_info));
     if (!result) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;

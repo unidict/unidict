@@ -609,7 +609,7 @@ static unidict_status ud_stardict_info_get(unidict *dict, unidict_info **out_inf
         return UNIDICT_OK;
     }
 
-    unidict_info *inf = malloc(sizeof(unidict_info));
+    unidict_info *inf = calloc(1, sizeof(unidict_info));
     if (!inf) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;
