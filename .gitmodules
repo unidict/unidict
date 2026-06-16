@@ -27,4 +27,4 @@
 	url = https://github.com/unidict/czim.git
 [submodule "deps/ldx"]
 	path = deps/ldx
-	url = git@github.com:unidict/ldx.git
+	url = https://github.com/unidict/ldx.git
