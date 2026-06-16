@@ -5,8 +5,9 @@
 .DS_Store
 /.claude
 xcuserdata/
-/build
-/build-cmake/
+
+# Build output (CMake/Xcode/ASan etc.) — covers build, build-cmake, build-asan, build-* variants
+/build*/
 
 # Stale standalone test binary (superseded by CMake/Xcode test targets)
 /udidx_test
