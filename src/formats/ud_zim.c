@@ -1155,6 +1155,70 @@ static unidict_status ud_zim_file_infos_get(unidict *dict, unidict_file_info_arr
     return UNIDICT_OK;
 }
 
+// ============================================================
+// Feature pages: expose the ZIM main page
+// ============================================================
+
+static unidict_status ud_zim_feature_pages_list(unidict *dict, unidict_feature_page_array **out_pages) {
+    ud_zim *zim = uobject_cast(&dict->obj, ud_zim, base.obj);
+
+    // The only feature page ZIM exposes is the main page; if the archive
+    // has none, return an empty list.
+    unidict_feature_page_array *arr = calloc(1, sizeof(*arr));
+    if (!arr) return UNIDICT_ERR_NOMEM;
+
+    if (czim_archive_has_main_entry(zim->archive)) {
+        unidict_feature_page *items = calloc(1, sizeof(*items));
+        if (!items) {
+            free(arr);
+            return UNIDICT_ERR_NOMEM;
+        }
+        items[0].key = strdup("main");
+        items[0].name = strdup("Main Page");
+        arr->items = items;
+        arr->count = 1;
+    }
+
+    *out_pages = arr;
+    return UNIDICT_OK;
+}
+
+static unidict_status ud_zim_feature_page_read(unidict *dict, const char *key, char **out_html) {
+    ud_zim *zim = uobject_cast(&dict->obj, ud_zim, base.obj);
+
+    // Only "main" is supported; ignore any query suffix.
+    size_t base_len = strlen(key);
+    const char *query = strchr(key, '?');
+    if (query) base_len = (size_t)(query - key);
+    if (base_len != 4 || strncmp(key, "main", 4) != 0) {
+        return UNIDICT_ERR_NOT_FOUND;
+    }
+
+    czim_entry *entry = czim_archive_get_main_entry(zim->archive, NULL);
+    if (!entry) return UNIDICT_ERR_NOT_FOUND;
+
+    czim_blob blob = czim_archive_get_blob(zim->archive, entry);
+    czim_entry_free(entry);
+    if (!czim_blob_data(&blob) || czim_blob_size(&blob) == 0) {
+        czim_blob_free(&blob);
+        return UNIDICT_ERR_IO;
+    }
+
+    // Return the raw HTML (null-terminated copy).
+    size_t size = czim_blob_size(&blob);
+    char *html = malloc(size + 1);
+    if (!html) {
+        czim_blob_free(&blob);
+        return UNIDICT_ERR_NOMEM;
+    }
+    memcpy(html, czim_blob_data(&blob), size);
+    html[size] = '\0';
+    czim_blob_free(&blob);
+
+    *out_html = html;
+    return UNIDICT_OK;
+}
+
 static const unidict_ops ud_zim_ops = {
     .prepare = NULL,
     .info_get = ud_zim_info_get,
@@ -1173,6 +1237,8 @@ static const unidict_ops ud_zim_ops = {
     .resource_iter_create = ud_zim_resource_iter_create,
     .resource_iter_next = ud_zim_resource_iter_next,
     .resource_iter_free = ud_zim_resource_iter_free,
+    .feature_pages_list = ud_zim_feature_pages_list,
+    .feature_page_read = ud_zim_feature_page_read,
 };
 
 // ============================================================
