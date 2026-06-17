@@ -331,36 +331,36 @@ static unidict_status ud_lingvo_dsl_info_get(unidict *dict, unidict_info **out_i
     }
 
     ud_lingvo_dsl *dsl = uobject_cast(&dict->obj, ud_lingvo_dsl, base.obj);
-    unidict_info *res = calloc(1, sizeof(unidict_info));
-    if (!res) {
+    unidict_info *info = calloc(1, sizeof(unidict_info));
+    if (!info) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;
     }
 
-    res->format = UNIDICT_FORMAT_DSL;
+    info->format = UNIDICT_FORMAT_DSL;
 
     if (dsl->udx_dict) {
         unidict_info *udx_info = NULL;
         if (dsl->udx_dict->ops->info_get) dsl->udx_dict->ops->info_get(dsl->udx_dict, &udx_info);
-        res->title = (udx_info && udx_info->title) ? strdup(udx_info->title) : strdup("DSL Dictionary");
-        res->word_count = udx_info ? udx_info->word_count : 0;
+        info->title = (udx_info && udx_info->title) ? strdup(udx_info->title) : strdup("DSL Dictionary");
+        info->word_count = udx_info ? udx_info->word_count : 0;
         if (udx_info) unidict_info_free(udx_info);
     } else if (dsl->reader) {
         const dsl_header *hdr = dsl_reader_get_header(dsl->reader);
         if (hdr && hdr->name) {
-            res->title = strdup(hdr->name);
+            info->title = strdup(hdr->name);
         } else {
             char *name = NULL;
             dsl_reader_get_name(dsl->reader, &name);
-            res->title = name ? name : strdup("DSL Dictionary");
+            info->title = name ? name : strdup("DSL Dictionary");
         }
-        if (hdr && hdr->index_language) res->source_lang = strdup(hdr->index_language);
-        if (hdr && hdr->contents_language) res->target_lang = strdup(hdr->contents_language);
+        if (hdr && hdr->index_language) info->source_lang = strdup(hdr->index_language);
+        if (hdr && hdr->contents_language) info->target_lang = strdup(hdr->contents_language);
     } else {
-        res->title = strdup("DSL Dictionary");
+        info->title = strdup("DSL Dictionary");
     }
 
-    *out_info = res;
+    *out_info = info;
     return UNIDICT_OK;
 }
 

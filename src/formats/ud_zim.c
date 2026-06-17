@@ -412,22 +412,22 @@ static unidict_status ud_zim_info_get(unidict *dict, unidict_info **out_info) {
         return st;
     }
 
-    unidict_info *res = calloc(1, sizeof(unidict_info));
-    if (!res) {
+    unidict_info *info = calloc(1, sizeof(unidict_info));
+    if (!info) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;
     }
 
-    res->format = UNIDICT_FORMAT_ZIM;
+    info->format = UNIDICT_FORMAT_ZIM;
 
     char *title = zim_get_metadata_string(zim->archive, "Title");
-    res->title = title ? title : strdup("ZIM Archive");
-    res->description = zim_get_metadata_string(zim->archive, "Description");
-    res->author = zim_get_metadata_string(zim->archive, "Creator");
-    res->creation_date = zim_get_metadata_string(zim->archive, "Date");
-    res->source_lang = zim_get_metadata_string(zim->archive, "Language");
-    res->target_lang = NULL;
-    res->word_count = czim_archive_article_count(zim->archive);
+    info->title = title ? title : strdup("ZIM Archive");
+    info->description = zim_get_metadata_string(zim->archive, "Description");
+    info->author = zim_get_metadata_string(zim->archive, "Creator");
+    info->creation_date = zim_get_metadata_string(zim->archive, "Date");
+    info->source_lang = zim_get_metadata_string(zim->archive, "Language");
+    info->target_lang = NULL;
+    info->word_count = czim_archive_article_count(zim->archive);
 
     // Icon
     uint32_t icon_index;
@@ -437,17 +437,17 @@ static unidict_status ud_zim_info_get(unidict *dict, unidict_info **out_info) {
         czim_blob icon_blob = czim_archive_get_blob(zim->archive, icon_entry);
         czim_entry_free(icon_entry);
         if (czim_blob_data(&icon_blob) && czim_blob_size(&icon_blob) > 0) {
-            res->icon_data = malloc(czim_blob_size(&icon_blob));
-            if (res->icon_data) {
-                memcpy(res->icon_data, czim_blob_data(&icon_blob), czim_blob_size(&icon_blob));
-                res->icon_size = czim_blob_size(&icon_blob);
-                res->icon_mime_type = strdup(ud_detect_image_mime(czim_blob_data(&icon_blob), czim_blob_size(&icon_blob)));
+            info->icon_data = malloc(czim_blob_size(&icon_blob));
+            if (info->icon_data) {
+                memcpy(info->icon_data, czim_blob_data(&icon_blob), czim_blob_size(&icon_blob));
+                info->icon_size = czim_blob_size(&icon_blob);
+                info->icon_mime_type = strdup(ud_detect_image_mime(czim_blob_data(&icon_blob), czim_blob_size(&icon_blob)));
             }
         }
         czim_blob_free(&icon_blob);
     }
 
-    *out_info = res;
+    *out_info = info;
     return UNIDICT_OK;
 }
 

@@ -609,22 +609,22 @@ static unidict_status ud_stardict_info_get(unidict *dict, unidict_info **out_inf
         return UNIDICT_OK;
     }
 
-    unidict_info *inf = calloc(1, sizeof(unidict_info));
-    if (!inf) {
+    unidict_info *info = calloc(1, sizeof(unidict_info));
+    if (!info) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;
     }
 
-    inf->format = dict->format;
-    inf->title = ifo->bookname ? strdup(ifo->bookname) : NULL;
-    inf->description = ifo->description ? strdup(ifo->description) : NULL;
-    inf->author = ifo->author ? strdup(ifo->author) : NULL;
-    inf->creation_date = ifo->date ? strdup(ifo->date) : NULL;
-    inf->source_lang = NULL;
-    inf->target_lang = NULL;
-    inf->word_count = ifo->wordcount;
+    info->format = dict->format;
+    info->title = ifo->bookname ? strdup(ifo->bookname) : NULL;
+    info->description = ifo->description ? strdup(ifo->description) : NULL;
+    info->author = ifo->author ? strdup(ifo->author) : NULL;
+    info->creation_date = ifo->date ? strdup(ifo->date) : NULL;
+    info->source_lang = NULL;
+    info->target_lang = NULL;
+    info->word_count = ifo->wordcount;
 
-    *out_info = inf;
+    *out_info = info;
     return UNIDICT_OK;
 }
 

@@ -1351,14 +1351,14 @@ static unidict_status epwing_info_get(unidict *dict, unidict_info **out_info) {
         return st;
     }
 
-    unidict_info *res = calloc(1, sizeof(unidict_info));
-    if (!res) return UNIDICT_ERR_NOMEM;
+    unidict_info *info = calloc(1, sizeof(unidict_info));
+    if (!info) return UNIDICT_ERR_NOMEM;
 
-    res->format = dict->format;
-    res->title = epwing->title ? strdup(epwing->title) : NULL;
-    res->subitem_count = epwing->subbook_count;
+    info->format = dict->format;
+    info->title = epwing->title ? strdup(epwing->title) : NULL;
+    info->subitem_count = epwing->subbook_count;
 
-    *out_info = res;
+    *out_info = info;
     return UNIDICT_OK;
 }
 

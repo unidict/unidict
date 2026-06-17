@@ -252,49 +252,49 @@ static unidict_status lingvo_info_get(unidict *dict, unidict_info **out_info) {
         return UNIDICT_OK;
     }
 
-    unidict_info *result = calloc(1, sizeof(unidict_info));
-    if (!result) {
+    unidict_info *info = calloc(1, sizeof(unidict_info));
+    if (!info) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;
     }
 
-    result->format = UNIDICT_FORMAT_LINGVO;
+    info->format = UNIDICT_FORMAT_LINGVO;
 
     char *name = NULL;
     if (lsd_reader_get_name(lingvo->reader, &name) == LSD_OK && name) {
-        result->title = name;
+        info->title = name;
     } else {
-        result->title = strdup("");
+        info->title = strdup("");
     }
 
     char *annotation = NULL;
     if (lsd_reader_read_annotation(lingvo->reader, &annotation) == LSD_OK && annotation) {
-        result->description = annotation;
+        info->description = annotation;
     } else {
-        result->description = NULL;
+        info->description = NULL;
     }
-    result->author = NULL;
-    result->creation_date = NULL;
-    result->source_lang = NULL;
-    result->target_lang = NULL;
+    info->author = NULL;
+    info->creation_date = NULL;
+    info->source_lang = NULL;
+    info->target_lang = NULL;
     const lsd_header *header = lsd_reader_get_header(lingvo->reader);
     if (header) {
         const char *src = lsd_reader_get_source_lang(lingvo->reader);
-        if (src) result->source_lang = strdup(src);
+        if (src) info->source_lang = strdup(src);
         const char *tgt = lsd_reader_get_target_lang(lingvo->reader);
-        if (tgt) result->target_lang = strdup(tgt);
+        if (tgt) info->target_lang = strdup(tgt);
     }
-    result->word_count = header ? header->entries_count : 0;
+    info->word_count = header ? header->entries_count : 0;
 
     if (header) {
         char ver_buf[16];
         snprintf(ver_buf, sizeof(ver_buf), "0x%08X", header->version);
-        result->format_version = strdup(ver_buf);
+        info->format_version = strdup(ver_buf);
     } else {
-        result->format_version = NULL;
+        info->format_version = NULL;
     }
 
-    *out_info = result;
+    *out_info = info;
     return UNIDICT_OK;
 }
 

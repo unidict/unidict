@@ -565,22 +565,22 @@ static unidict_status mdict_info_get(unidict *dict, unidict_info **out_info) {
         return UNIDICT_OK;
     }
 
-    unidict_info *res = calloc(1, sizeof(unidict_info));
-    if (!res) {
+    unidict_info *info = calloc(1, sizeof(unidict_info));
+    if (!info) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;
     }
 
-    res->format = dict->format;
-    res->title = meta->title ? strdup(meta->title) : NULL;
-    res->description = meta->description ? strdup(meta->description) : NULL;
-    res->author = NULL;
-    res->creation_date = meta->creation_date ? strdup(meta->creation_date) : NULL;
-    res->source_lang = NULL;
-    res->target_lang = NULL;
-    res->word_count = (uint64_t)cmdx_reader_get_key_count(mdict->mdx_reader);
+    info->format = dict->format;
+    info->title = meta->title ? strdup(meta->title) : NULL;
+    info->description = meta->description ? strdup(meta->description) : NULL;
+    info->author = NULL;
+    info->creation_date = meta->creation_date ? strdup(meta->creation_date) : NULL;
+    info->source_lang = NULL;
+    info->target_lang = NULL;
+    info->word_count = (uint64_t)cmdx_reader_get_key_count(mdict->mdx_reader);
 
-    *out_info = res;
+    *out_info = info;
     return UNIDICT_OK;
 }
 

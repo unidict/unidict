@@ -697,24 +697,24 @@ static unidict_status ud_dictd_info_get(unidict *dict, unidict_info **out_info) 
     // Builtin mode: use cached metadata from 00database* entries
     const sd_dictfile_index *idx = dictd->dictd_dict ? sd_dictd_get_index(dictd->dictd_dict) : NULL;
 
-    unidict_info *info_ptr = calloc(1, sizeof(unidict_info));
-    if (!info_ptr) {
+    unidict_info *info = calloc(1, sizeof(unidict_info));
+    if (!info) {
         *out_info = NULL;
         return UNIDICT_ERR_NOMEM;
     }
 
-    info_ptr->format = dict->format;
-    info_ptr->title = dictd->db_title ? strdup(dictd->db_title) : strdup("dictd dictionary");
-    info_ptr->description = dictd->db_description ? strdup(dictd->db_description) : NULL;
-    info_ptr->author = NULL;
-    info_ptr->creation_date = NULL;
-    info_ptr->source_lang = NULL;
-    info_ptr->target_lang = NULL;
+    info->format = dict->format;
+    info->title = dictd->db_title ? strdup(dictd->db_title) : strdup("dictd dictionary");
+    info->description = dictd->db_description ? strdup(dictd->db_description) : NULL;
+    info->author = NULL;
+    info->creation_date = NULL;
+    info->source_lang = NULL;
+    info->target_lang = NULL;
 
     uint32_t total = idx ? sd_dictfile_index_get_count(idx) : 0;
-    info_ptr->word_count = (total > dictd->db_special_count) ? (uint64_t)(total - dictd->db_special_count) : 0;
+    info->word_count = (total > dictd->db_special_count) ? (uint64_t)(total - dictd->db_special_count) : 0;
 
-    *out_info = info_ptr;
+    *out_info = info;
     return UNIDICT_OK;
 }
 

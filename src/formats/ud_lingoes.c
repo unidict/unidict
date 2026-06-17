@@ -203,71 +203,71 @@ static unidict_status lingoes_info_get(unidict *dict, unidict_info **out_info) {
     }
 
     // Native mode: read from ldx reader
-    unidict_info *dict_info = calloc(1, sizeof(unidict_info));
-    if (!dict_info) return UNIDICT_ERR_NOMEM;
+    unidict_info *info = calloc(1, sizeof(unidict_info));
+    if (!info) return UNIDICT_ERR_NOMEM;
 
-    dict_info->format = UNIDICT_FORMAT_LINGOES;
+    info->format = UNIDICT_FORMAT_LINGOES;
 
     if (lingoes->reader) {
-        const ldx_info *info = ldx_reader_get_info(lingoes->reader);
-        dict_info->word_count = info ? (uint64_t)info->gls_count : 0;
-        dict_info->source_lang = (info && info->from_lang) ? strdup(info->from_lang) : NULL;
+        const ldx_info *native = ldx_reader_get_info(lingoes->reader);
+        info->word_count = native ? (uint64_t)native->gls_count : 0;
+        info->source_lang = (native && native->from_lang) ? strdup(native->from_lang) : NULL;
 
         // Format version
-        if (info && (info->version_major > 0 || info->version_minor > 0)) {
+        if (native && (native->version_major > 0 || native->version_minor > 0)) {
             char ver[32];
-            snprintf(ver, sizeof(ver), "%d.%d", info->version_major, info->version_minor);
-            dict_info->format_version = strdup(ver);
+            snprintf(ver, sizeof(ver), "%d.%d", native->version_major, native->version_minor);
+            info->format_version = strdup(ver);
         }
 
         // Icon
-        if (info && info->icon_data && info->icon_size > 0) {
-            dict_info->icon_data = malloc(info->icon_size);
-            if (dict_info->icon_data) {
-                memcpy(dict_info->icon_data, info->icon_data, info->icon_size);
-                dict_info->icon_size = info->icon_size;
-                dict_info->icon_mime_type = strdup(ud_detect_image_mime(info->icon_data, info->icon_size));
+        if (native && native->icon_data && native->icon_size > 0) {
+            info->icon_data = malloc(native->icon_size);
+            if (info->icon_data) {
+                memcpy(info->icon_data, native->icon_data, native->icon_size);
+                info->icon_size = native->icon_size;
+                info->icon_mime_type = strdup(ud_detect_image_mime(native->icon_data, native->icon_size));
             }
         }
 
         // Title from dict/@name (always present), fallback to item title
-        if (info->name && info->name[0]) {
-            dict_info->title = strdup(info->name);
+        if (native->name && native->name[0]) {
+            info->title = strdup(native->name);
         }
 
-        if (info->items && info->item_count > 0) {
+        if (native->items && native->item_count > 0) {
             // Find matching item by pref_lang, fallback to items[0]
-            const ldx_info_item *item = &info->items[0];
+            const ldx_info_item *item = &native->items[0];
             if (lingoes->pref_lang) {
-                for (int i = 0; i < info->item_count; i++) {
-                    if (info->items[i].lang && strcmp(info->items[i].lang, lingoes->pref_lang) == 0) {
-                        item = &info->items[i];
+                for (int i = 0; i < native->item_count; i++) {
+                    if (native->items[i].lang && strcmp(native->items[i].lang, lingoes->pref_lang) == 0) {
+                        item = &native->items[i];
                         break;
                     }
                 }
             }
             // Fill from matched item, then fallback from other items
-            if (!dict_info->title) {
-                dict_info->title = (item->title && item->title[0]) ? strdup(item->title) : strdup("Lingoes Dictionary");
+            if (!info->title) {
+                info->title = (item->title && item->title[0]) ? strdup(item->title) : strdup("Lingoes Dictionary");
             }
-            dict_info->subtitle = (item->title && item->title[0]) ? strdup(item->title) : NULL;
-            dict_info->description = (item->description && item->description[0]) ? strdup(item->description) : NULL;
-            dict_info->author = (item->author && item->author[0]) ? strdup(item->author) : NULL;
-            dict_info->email = (item->email && item->email[0]) ? strdup(item->email) : NULL;
-            lingoes_info_fallback_from_items(dict_info, info->items, info->item_count);
+            info->subtitle = (item->title && item->title[0]) ? strdup(item->title) : NULL;
+            info->description = (item->description && item->description[0]) ? strdup(item->description) : NULL;
+            info->author = (item->author && item->author[0]) ? strdup(item->author) : NULL;
+            info->email = (item->email && item->email[0]) ? strdup(item->email) : NULL;
+            lingoes_info_fallback_from_items(info, native->items, native->item_count);
             if (item->edition > 0) {
                 char buf[16];
                 snprintf(buf, sizeof(buf), "%d", item->edition);
-                dict_info->edition = strdup(buf);
+                info->edition = strdup(buf);
             }
-        } else if (!dict_info->title) {
-            dict_info->title = strdup("Lingoes Dictionary");
+        } else if (!info->title) {
+            info->title = strdup("Lingoes Dictionary");
         }
     } else {
-        dict_info->title = strdup("Lingoes Dictionary");
+        info->title = strdup("Lingoes Dictionary");
     }
 
-    *out_info = dict_info;
+    *out_info = info;
     return UNIDICT_OK;
 }
 
