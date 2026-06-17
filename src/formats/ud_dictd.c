@@ -376,14 +376,19 @@ static void meta_html_append(char **buf, size_t *len, size_t *cap, const char *t
         else if (*p == '"') entity = "&quot;";
 
         size_t need = entity ? strlen(entity) : 1;
-        if (*len + need + 1 > *cap) {
-            while (*len + need + 1 > *cap) *cap = *cap ? *cap * 2 : 128;
-            char *nb = realloc(*buf, *cap);
+        // Ensure room for 'need' bytes plus a trailing NUL (kept invariant:
+        // after every call, buf[len] is writable and we never leave it
+        // unterminated across calls in a way that overflows).
+        if (*len + need >= *cap) {
+            size_t newcap = *cap ? *cap : 128;
+            while (*len + need + 1 > newcap) newcap *= 2;
+            char *nb = realloc(*buf, newcap);
             if (!nb) return;  // best-effort; skip on OOM
             *buf = nb;
+            *cap = newcap;
         }
         if (entity) { memcpy(*buf + *len, entity, need); *len += need; }
-        else { (*buf)[*len++] = *p; }
+        else { (*buf)[*len] = *p; *len += 1; }
     }
 }
 

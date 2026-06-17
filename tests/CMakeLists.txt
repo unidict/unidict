@@ -6,6 +6,7 @@ set(TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_fixture.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test_babylon.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test_stardict.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_dictd.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test_lingvo.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test_zim.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test_mdict.c
