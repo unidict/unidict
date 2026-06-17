@@ -172,6 +172,21 @@ unidict *ud_lingvo_open(const char *lsd_path, const unidict_open_options *option
         return NULL;
     }
 
+    // LSD reader is open, so the builtin page-store index is available.
+    lingvo->base.has_builtin_index = true;
+    lingvo->base.has_external_index = unidict_detect_external_index(lsd_path);
+
+    // Honor options->index_type; NONE means auto-detect (external > builtin).
+    unidict_index_type preset =
+        (options && options->index_type != UNIDICT_INDEX_NONE) ? options->index_type : UNIDICT_INDEX_NONE;
+
+    if (lingvo_index_activate(&lingvo->base, preset) != UNIDICT_OK) {
+        // index_activate failed (e.g. EXTERNAL requested but no UDX present);
+        // release everything allocated so far.
+        ud_lingvo_release((uobject *)lingvo);
+        return NULL;
+    }
+
     return &lingvo->base;
 }
 
