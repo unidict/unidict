@@ -14,6 +14,7 @@
 #include "sd_types.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <errno.h>
 
 // ============================================================
@@ -43,6 +44,12 @@ static const uobject_type ud_dictd_index_type = {
 
 typedef struct ud_dictd ud_dictd;
 
+// One 00-database-* metadata entry (headword + definition text).
+typedef struct {
+    char *word;        // headword, e.g. "00-database-short"
+    char *definition;  // definition text (may be NULL if not fetched)
+} dictd_meta_entry;
+
 struct ud_dictd {
     unidict base;
     char *index_path;  // stored .index path for deriving .udx path
@@ -55,6 +62,10 @@ struct ud_dictd {
     char *db_description;    // 00-database-info definition (+ appended url)
     bool utf8_mode;          // 00databaseutf8 present
     uint32_t db_special_count; // number of 00database* entries at head of index
+
+    // All 00-database-* entries (for the "meta" feature page)
+    dictd_meta_entry *meta_entries;
+    size_t meta_count;
 };
 
 // ============================================================
@@ -77,6 +88,8 @@ static unidict_status ud_dictd_index_external_make(unidict *dict, unidict_index_
 static unidict_entry_iter *ud_dictd_entry_iter_create(unidict *dict);
 static unidict_status ud_dictd_entry_iter_next(unidict_entry_iter *iter, unidict_entry **out_entry);
 static void ud_dictd_entry_iter_free(unidict_entry_iter *iter);
+static unidict_status ud_dictd_feature_pages_list(unidict *dict, unidict_feature_page_array **out_pages);
+static unidict_status ud_dictd_feature_page_read(unidict *dict, const char *key, char **out_html);
 
 static const unidict_ops dictd_ops = {
     .prepare = NULL,
@@ -96,6 +109,8 @@ static const unidict_ops dictd_ops = {
     .resource_iter_create = NULL,
     .resource_iter_next = NULL,
     .resource_iter_free = NULL,
+    .feature_pages_list = ud_dictd_feature_pages_list,
+    .feature_page_read = ud_dictd_feature_page_read,
 };
 
 static const uobject_type ud_dictd_type = {
@@ -125,6 +140,11 @@ static void ud_dictd_release(uobject *obj) {
     free(dictd->index_path);
     free(dictd->db_title);
     free(dictd->db_description);
+    for (size_t i = 0; i < dictd->meta_count; i++) {
+        free(dictd->meta_entries[i].word);
+        free(dictd->meta_entries[i].definition);
+    }
+    free(dictd->meta_entries);
     free(dictd);
 }
 
@@ -155,36 +175,50 @@ static void load_db_metadata(ud_dictd *dictd) {
     uint32_t total = sd_dictfile_index_get_count(idx);
     char *url = NULL;
 
-    // Scan leading 00database* entries (they're always at the head)
-    for (uint32_t i = 0; i < total && i < 20; i++) {
+    // First pass: count leading 00database* entries (they sit at the head).
+    uint32_t meta_total = 0;
+    for (uint32_t i = 0; i < total && i < 64; i++) {
         const sd_dictfile_index_entry *entry = sd_dictfile_index_get_entry((sd_dictfile_index *)idx, i);
         if (!entry || !entry->word || !is_db_special_entry(entry->word)) break;
+        meta_total = i + 1;
+    }
+    dictd->db_special_count = meta_total;
 
-        dictd->db_special_count = i + 1;
+    if (meta_total == 0) return;
 
-        // Read definition for interesting entries
+    dictd->meta_entries = calloc(meta_total, sizeof(dictd_meta_entry));
+    if (!dictd->meta_entries) return;  // non-fatal: feature page will be empty
+
+    // Second pass: record each entry's word + definition.
+    for (uint32_t i = 0; i < meta_total; i++) {
+        const sd_dictfile_index_entry *entry = sd_dictfile_index_get_entry((sd_dictfile_index *)idx, i);
+        if (!entry || !entry->word) continue;
+
+        dictd_meta_entry *m = &dictd->meta_entries[dictd->meta_count];
+        m->word = strdup(entry->word);
+        if (!m->word) continue;
+
+        // Fetch definition text for this entry.
         char *defi = NULL;
-        if (strcmp(entry->word, "00-database-short") == 0 || strcmp(entry->word, "00databaseshort") == 0 ||
-            strcmp(entry->word, "00-database-info") == 0 || strcmp(entry->word, "00databaseinfo") == 0 ||
-            strcmp(entry->word, "00-database-url") == 0 || strcmp(entry->word, "00databaseurl") == 0) {
-            sd_dictfile_index_entry temp = {.word = NULL, .offset = entry->offset, .size = entry->size};
-            sd_dictd_fetch(dictd->dictd_dict, &temp, &defi);
-        }
+        sd_dictfile_index_entry temp = {.word = NULL, .offset = entry->offset, .size = entry->size};
+        sd_dictd_fetch(dictd->dictd_dict, &temp, &defi);
+        m->definition = defi;  // may be NULL
 
-        if ((strcmp(entry->word, "00-database-short") == 0 || strcmp(entry->word, "00databaseshort") == 0) && defi) {
-            dictd->db_title = defi;
-            defi = NULL;
-        } else if ((strcmp(entry->word, "00-database-info") == 0 || strcmp(entry->word, "00databaseinfo") == 0) && defi) {
-            dictd->db_description = defi;
-            defi = NULL;
-        } else if ((strcmp(entry->word, "00-database-url") == 0 || strcmp(entry->word, "00databaseurl") == 0) && defi) {
-            url = defi;
-            defi = NULL;
+        // Keep the well-known fields for info_get / fast access.
+        if (strcmp(entry->word, "00-database-short") == 0 ||
+            strcmp(entry->word, "00databaseshort") == 0) {
+            if (defi) { free(dictd->db_title); dictd->db_title = strdup(defi); }
+        } else if (strcmp(entry->word, "00-database-info") == 0 ||
+                   strcmp(entry->word, "00databaseinfo") == 0) {
+            if (defi) { free(dictd->db_description); dictd->db_description = strdup(defi); }
+        } else if (strcmp(entry->word, "00-database-url") == 0 ||
+                   strcmp(entry->word, "00databaseurl") == 0) {
+            if (defi) { free(url); url = strdup(defi); }
         } else if (strcmp(entry->word, "00databaseutf8") == 0) {
             dictd->utf8_mode = true;
         }
 
-        free(defi);
+        dictd->meta_count++;
     }
 
     // Append url to description
@@ -305,6 +339,96 @@ static unidict_status ud_dictd_index_activate(unidict *dict, unidict_index_type 
     }
 
     return UNIDICT_ERR_IO;
+}
+
+// ============================================================
+// Feature pages: "meta" lists every 00-database-* metadata entry
+// ============================================================
+
+static unidict_status ud_dictd_feature_pages_list(unidict *dict, unidict_feature_page_array **out_pages) {
+    ud_dictd *dictd = uobject_cast(&dict->obj, ud_dictd, base.obj);
+
+    unidict_feature_page_array *arr = calloc(1, sizeof(*arr));
+    if (!arr) return UNIDICT_ERR_NOMEM;
+
+    // The "meta" page only makes sense if there are 00-database-* entries.
+    if (dictd->meta_count > 0) {
+        unidict_feature_page *items = calloc(1, sizeof(*items));
+        if (!items) { free(arr); return UNIDICT_ERR_NOMEM; }
+        items[0].key = strdup("meta");
+        items[0].name = strdup("Database Metadata");
+        arr->items = items;
+        arr->count = 1;
+    }
+
+    *out_pages = arr;
+    return UNIDICT_OK;
+}
+
+// Minimal HTML escaping into a malloc'd buffer; appends the escaped form.
+static void meta_html_append(char **buf, size_t *len, size_t *cap, const char *text) {
+    if (!text) return;
+    for (const char *p = text; *p; p++) {
+        const char *entity = NULL;
+        if (*p == '&') entity = "&amp;";
+        else if (*p == '<') entity = "&lt;";
+        else if (*p == '>') entity = "&gt;";
+        else if (*p == '"') entity = "&quot;";
+
+        size_t need = entity ? strlen(entity) : 1;
+        if (*len + need + 1 > *cap) {
+            while (*len + need + 1 > *cap) *cap = *cap ? *cap * 2 : 128;
+            char *nb = realloc(*buf, *cap);
+            if (!nb) return;  // best-effort; skip on OOM
+            *buf = nb;
+        }
+        if (entity) { memcpy(*buf + *len, entity, need); *len += need; }
+        else { (*buf)[*len++] = *p; }
+    }
+}
+
+static unidict_status ud_dictd_feature_page_read(unidict *dict, const char *key, char **out_html) {
+    ud_dictd *dictd = uobject_cast(&dict->obj, ud_dictd, base.obj);
+
+    // Only "meta" is supported; ignore any query suffix.
+    size_t base_len = strlen(key);
+    const char *query = strchr(key, '?');
+    if (query) base_len = (size_t)(query - key);
+    if (base_len != 4 || strncmp(key, "meta", 4) != 0) {
+        return UNIDICT_ERR_NOT_FOUND;
+    }
+
+    if (dictd->meta_count == 0) return UNIDICT_ERR_NOT_FOUND;
+
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    // Open table
+    const char *prefix = "<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\">\n"
+                         "<title>Database Metadata</title></head>\n<body>\n"
+                         "<h1>Database Metadata</h1>\n<table border=\"1\" cellpadding=\"4\">\n"
+                         "<tr><th>Entry</th><th>Value</th></tr>\n";
+    meta_html_append(&buf, &len, &cap, prefix);
+
+    for (size_t i = 0; i < dictd->meta_count; i++) {
+        meta_html_append(&buf, &len, &cap, "<tr><td>");
+        meta_html_append(&buf, &len, &cap, dictd->meta_entries[i].word);
+        meta_html_append(&buf, &len, &cap, "</td><td><pre>");
+        meta_html_append(&buf, &len, &cap, dictd->meta_entries[i].definition);
+        meta_html_append(&buf, &len, &cap, "</pre></td></tr>\n");
+    }
+
+    meta_html_append(&buf, &len, &cap, "</table>\n</body>\n</html>\n");
+
+    if (!buf) return UNIDICT_ERR_NOMEM;
+    // Ensure null-termination.
+    if (len + 1 > cap) {
+        char *nb = realloc(buf, len + 1);
+        if (!nb) { free(buf); return UNIDICT_ERR_NOMEM; }
+        buf = nb;
+    }
+    buf[len] = '\0';
+    *out_html = buf;
+    return UNIDICT_OK;
 }
 
 // ============================================================
