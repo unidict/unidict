@@ -1315,6 +1315,16 @@ unidict *ud_epwing_open(const char *path, const unidict_open_options *options) {
         }
     }
 
+    // Detect external UDX index; honor options->index_type (NONE = auto-detect).
+    epwing->base.has_external_index = unidict_detect_external_index(path);
+    unidict_index_type preset =
+        (options && options->index_type != UNIDICT_INDEX_NONE) ? options->index_type : UNIDICT_INDEX_NONE;
+
+    if (epwing_index_activate(&epwing->base, preset) != UNIDICT_OK) {
+        ud_epwing_release(&epwing->base.obj);
+        return NULL;
+    }
+
     return &epwing->base;
 }
 

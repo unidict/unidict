@@ -1368,5 +1368,16 @@ unidict *ud_mdict_open(const char *mdx_path, const unidict_open_options *options
     }
 
     ud_file_list_free(mdd_list);
+
+    // Detect external UDX index; honor options->index_type (NONE = auto-detect).
+    mdict->base.has_external_index = unidict_detect_external_index(mdx_path);
+    unidict_index_type preset =
+        (options && options->index_type != UNIDICT_INDEX_NONE) ? options->index_type : UNIDICT_INDEX_NONE;
+
+    if (mdict_index_activate(&mdict->base, preset) != UNIDICT_OK) {
+        ud_mdict_release(&mdict->base.obj);
+        return NULL;
+    }
+
     return &mdict->base;
 }
