@@ -491,7 +491,7 @@ static EB_Error_Code render_gaiji(EB_Book *book, void *container, int char_numbe
         break;
     }
     case UNIDICT_EPWING_GAIJI_ASCII_ART: {
-        char bitmap[64];
+        char bitmap[EB_SIZE_WIDE_FONT_48];
         int width = is_wide ? 16 : 8;
         int height = 16;
         EB_Error_Code ec = is_wide
@@ -754,8 +754,9 @@ static ssize_t epwing_read_menu_text(ud_epwing *epwing, const EB_Position *pos,
 #define MENU_APPEND(...) do { \
     int _n = snprintf(*buf + *len, *cap - *len, __VA_ARGS__); \
     if (_n > 0 && (size_t)_n >= *cap - *len) { \
-        *cap *= 2; \
-        *buf = realloc(*buf, *cap); \
+        size_t _newcap = *cap * 2; \
+        char *_nb = realloc(*buf, _newcap); \
+        if (_nb) { *buf = _nb; *cap = _newcap; } \
         _n = snprintf(*buf + *len, *cap - *len, __VA_ARGS__); \
     } \
     if (_n > 0) *len += _n; \
@@ -2090,7 +2091,7 @@ static unidict_status epwing_resource_get(unidict *dict, const char *key, unidic
         }
         int char_number = (int)strtol(gp + 2, NULL, 10);
 
-        char bitmap[64];
+        char bitmap[EB_SIZE_WIDE_FONT_48];
         ec = is_wide
             ? eb_wide_font_character_bitmap(&epwing->book, char_number, bitmap)
             : eb_narrow_font_character_bitmap(&epwing->book, char_number, bitmap);

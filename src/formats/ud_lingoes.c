@@ -231,11 +231,11 @@ static unidict_status lingoes_info_get(unidict *dict, unidict_info **out_info) {
         }
 
         // Title from dict/@name (always present), fallback to item title
-        if (native->name && native->name[0]) {
+        if (native && native->name && native->name[0]) {
             info->title = strdup(native->name);
         }
 
-        if (native->items && native->item_count > 0) {
+        if (native && native->items && native->item_count > 0) {
             // Find matching item by pref_lang, fallback to items[0]
             const ldx_info_item *item = &native->items[0];
             if (lingoes->pref_lang) {

@@ -400,9 +400,14 @@ static unidict_status ud_babylon_info_get(unidict *dict, unidict_info **out_info
 
     const bgl_info *bglinfo = bgl_get_info(babylon->reader);
     info->format = UNIDICT_FORMAT_BABYLON;
+    info->word_count = (uint64_t)bgl_get_entry_count(babylon->reader);
+    if (!bglinfo) {
+        info->title = strdup("Babylon Dictionary");
+        *out_info = info;
+        return UNIDICT_OK;
+    }
     info->title = bglinfo->title ? strdup(bglinfo->title) : strdup("Babylon Dictionary");
     info->description = bglinfo->description ? strdup(bglinfo->description) : NULL;
-    info->word_count = (uint64_t)bgl_get_entry_count(babylon->reader);
     info->author = bglinfo->author ? strdup(bglinfo->author) : NULL;
     info->email = bglinfo->email ? strdup(bglinfo->email) : NULL;
     info->creation_date = NULL;

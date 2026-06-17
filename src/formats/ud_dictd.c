@@ -564,6 +564,7 @@ static unidict_status ud_dictd_entry_lookup(unidict *dict, const char *key, unid
 
     for (size_t i = 0; i < sd_result->count; i++) {
         sd_dictfile_index_entry *index_entry = sd_result->items[i];
+        if (!index_entry) continue;
         if (is_db_special_entry(index_entry->word)) continue;
 
         ud_dictd_index *idx = calloc(1, sizeof(ud_dictd_index));

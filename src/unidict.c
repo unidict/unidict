@@ -308,20 +308,13 @@ unidict_status unidict_info_get(unidict *dict, unidict_info **out_info) {
     unidict_ensure_prepared(dict);
 
     if (!dict->ops || !dict->ops->info_get) {
-        *out_info = malloc(sizeof(unidict_info));
+        *out_info = calloc(1, sizeof(unidict_info));
         if (!*out_info) {
             UD_LOG_ERROR("failed to allocate info");
             return UNIDICT_ERR_NOMEM;
         }
 
         (*out_info)->format = dict->format;
-        (*out_info)->title = NULL;
-        (*out_info)->description = NULL;
-        (*out_info)->author = NULL;
-        (*out_info)->email = NULL;
-        (*out_info)->creation_date = NULL;
-        (*out_info)->source_lang = NULL;
-        (*out_info)->target_lang = NULL;
         (*out_info)->word_count = 0;
         (*out_info)->subitem_count = 0;
 
@@ -735,6 +728,8 @@ static void unidict_entry_free(unidict_entry *entry) {
         uobject_release(entry->internal_entry);
         entry->internal_entry = NULL;
     }
+
+    free(entry);
 }
 
 void unidict_entry_array_free(unidict_entry_array *array) {
