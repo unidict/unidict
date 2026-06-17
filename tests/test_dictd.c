@@ -54,6 +54,10 @@ void test_dictd_feature_page_meta(void) {
     TEST_ASSERT_EQUAL(UNIDICT_OK, unidict_feature_page_read(dict, "meta", &html));
     TEST_ASSERT_NOT_NULL(html);
     TEST_ASSERT_TRUE(strlen(html) > 0);
+    // Real HTML markup must be present (not escaped), and user data
+    // (00databaseshort) must appear verbatim.
+    TEST_ASSERT_NOT_NULL(strstr(html, "<!DOCTYPE html>"));
+    TEST_ASSERT_NULL(strstr(html, "&lt;DOCTYPE"));
     TEST_ASSERT_NOT_NULL(strstr(html, "00databaseshort"));
     free(html);
 

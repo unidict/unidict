@@ -365,8 +365,29 @@ static unidict_status ud_dictd_feature_pages_list(unidict *dict, unidict_feature
     return UNIDICT_OK;
 }
 
-// Minimal HTML escaping into a malloc'd buffer; appends the escaped form.
-static void meta_html_append(char **buf, size_t *len, size_t *cap, const char *text) {
+// Ensure the buffer has room for at least 'extra' more bytes plus a NUL.
+static void meta_ensure(char **buf, size_t *len, size_t *cap, size_t extra) {
+    if (*len + extra + 1 <= *cap) return;
+    size_t newcap = *cap ? *cap : 128;
+    while (*len + extra + 1 > newcap) newcap *= 2;
+    char *nb = realloc(*buf, newcap);
+    if (!nb) return;  // best-effort; skip on OOM
+    *buf = nb;
+    *cap = newcap;
+}
+
+// Append literal text (HTML markup) verbatim.
+static void meta_append_raw(char **buf, size_t *len, size_t *cap, const char *text) {
+    if (!text) return;
+    size_t n = strlen(text);
+    meta_ensure(buf, len, cap, n);
+    if (!*buf || *len + n + 1 > *cap) return;  // OOM
+    memcpy(*buf + *len, text, n);
+    *len += n;
+}
+
+// Append text with HTML escaping (for user data: headwords / definitions).
+static void meta_append_escaped(char **buf, size_t *len, size_t *cap, const char *text) {
     if (!text) return;
     for (const char *p = text; *p; p++) {
         const char *entity = NULL;
@@ -376,17 +397,8 @@ static void meta_html_append(char **buf, size_t *len, size_t *cap, const char *t
         else if (*p == '"') entity = "&quot;";
 
         size_t need = entity ? strlen(entity) : 1;
-        // Ensure room for 'need' bytes plus a trailing NUL (kept invariant:
-        // after every call, buf[len] is writable and we never leave it
-        // unterminated across calls in a way that overflows).
-        if (*len + need >= *cap) {
-            size_t newcap = *cap ? *cap : 128;
-            while (*len + need + 1 > newcap) newcap *= 2;
-            char *nb = realloc(*buf, newcap);
-            if (!nb) return;  // best-effort; skip on OOM
-            *buf = nb;
-            *cap = newcap;
-        }
+        meta_ensure(buf, len, cap, need);
+        if (!*buf || *len + need + 1 > *cap) return;  // OOM
         if (entity) { memcpy(*buf + *len, entity, need); *len += need; }
         else { (*buf)[*len] = *p; *len += 1; }
     }
@@ -412,17 +424,17 @@ static unidict_status ud_dictd_feature_page_read(unidict *dict, const char *key,
                          "<title>Database Metadata</title></head>\n<body>\n"
                          "<h1>Database Metadata</h1>\n<table border=\"1\" cellpadding=\"4\">\n"
                          "<tr><th>Entry</th><th>Value</th></tr>\n";
-    meta_html_append(&buf, &len, &cap, prefix);
+    meta_append_raw(&buf, &len, &cap, prefix);
 
     for (size_t i = 0; i < dictd->meta_count; i++) {
-        meta_html_append(&buf, &len, &cap, "<tr><td>");
-        meta_html_append(&buf, &len, &cap, dictd->meta_entries[i].word);
-        meta_html_append(&buf, &len, &cap, "</td><td><pre>");
-        meta_html_append(&buf, &len, &cap, dictd->meta_entries[i].definition);
-        meta_html_append(&buf, &len, &cap, "</pre></td></tr>\n");
+        meta_append_raw(&buf, &len, &cap, "<tr><td>");
+        meta_append_escaped(&buf, &len, &cap, dictd->meta_entries[i].word);
+        meta_append_raw(&buf, &len, &cap, "</td><td><pre>");
+        meta_append_escaped(&buf, &len, &cap, dictd->meta_entries[i].definition);
+        meta_append_raw(&buf, &len, &cap, "</pre></td></tr>\n");
     }
 
-    meta_html_append(&buf, &len, &cap, "</table>\n</body>\n</html>\n");
+    meta_append_raw(&buf, &len, &cap, "</table>\n</body>\n</html>\n");
 
     if (!buf) return UNIDICT_ERR_NOMEM;
     // Ensure null-termination.
