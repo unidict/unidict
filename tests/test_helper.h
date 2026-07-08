@@ -12,9 +12,8 @@
 #include <stdbool.h>
 
 // Index-build callback that never cancels.
-static bool unidict_test_index_cb(unidict *dict, unidict_index_stage stage,
-                                  int percent, void *user_data) {
-    (void)dict; (void)stage; (void)percent; (void)user_data;
+static bool unidict_test_index_cb(unidict *dict, int percent, void *user_data) {
+    (void)dict; (void)percent; (void)user_data;
     return true;
 }
 

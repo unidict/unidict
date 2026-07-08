@@ -7,6 +7,7 @@
 #include "ud_zim.h"
 #include "unidict_internal.h"
 #include "ud_udx.h"
+#include <sys/stat.h>
 #include "ud_mime.h"
 #include "udx_writer.h"
 #include "czim_archive.h"
@@ -303,28 +304,35 @@ static unidict_status ud_zim_lookup(unidict *dict, const char *key, unidict_arti
             czim_entry *zim_entry = czim_archive_get_entry_by_index(zim->archive, idx);
             if (!zim_entry) continue;
 
-            const char *title = czim_entry_get_title(zim_entry);
+            // Copy title immediately — zim_entry may be freed by resolve_redirect
+            const char *title_raw = czim_entry_get_title(zim_entry);
+            char *title = title_raw ? strdup(title_raw) : NULL;
 
             if (czim_entry_is_redirect(zim_entry)) {
+                // resolve_redirect frees zim_entry internally, returns new entry or NULL
                 czim_entry *resolved = czim_archive_resolve_redirect(zim->archive, zim_entry, 10);
                 if (resolved) {
                     czim_blob blob = czim_archive_get_blob(zim->archive, resolved);
                     if (czim_blob_data(&blob)) {
-                        res->items[i].title = title ? strdup(title) : NULL;
+                        res->items[i].title = title;
+                        title = NULL;
                         res->items[i].body = html_to_text(czim_blob_data(&blob), czim_blob_size(&blob));
                     }
                     czim_blob_free(&blob);
                     czim_entry_free(resolved);
                 }
+                // zim_entry already freed by resolve_redirect, do not free again
             } else {
                 czim_blob blob = czim_archive_get_blob(zim->archive, zim_entry);
                 if (czim_blob_data(&blob)) {
-                    res->items[i].title = title ? strdup(title) : NULL;
+                    res->items[i].title = title;
+                    title = NULL;
                     res->items[i].body = html_to_text(czim_blob_data(&blob), czim_blob_size(&blob));
                 }
                 czim_blob_free(&blob);
+                czim_entry_free(zim_entry);
             }
-            czim_entry_free(zim_entry);
+            free(title);
         }
         udx_db_value_entry_free(ve);
         *out_articles = res;
@@ -341,10 +349,9 @@ static unidict_status ud_zim_lookup(unidict *dict, const char *key, unidict_arti
         }
     }
 
-    // 跟随重定向
+    // Follow redirect
     if (czim_entry_is_redirect(entry)) {
         czim_entry *resolved = czim_archive_resolve_redirect(zim->archive, entry, 10);
-        czim_entry_free(entry);
         if (!resolved) {
             *out_articles = NULL;
             return UNIDICT_OK;
@@ -596,10 +603,9 @@ static unidict_status ud_zim_fetch(unidict *dict, unidict_entry *entry, unidict_
         return UNIDICT_OK;
     }
 
-    // 跟随重定向
+    // Follow redirect (resolve_redirect frees zim_entry internally, returns new entry or NULL)
     if (czim_entry_is_redirect(zim_entry)) {
         czim_entry *resolved = czim_archive_resolve_redirect(zim->archive, zim_entry, 10);
-        czim_entry_free(zim_entry);
         if (!resolved) {
             *out_articles = NULL;
             return UNIDICT_OK;
@@ -1022,12 +1028,32 @@ static unidict_status ud_zim_index_external_make(unidict *dict, unidict_index_ex
     char *lang = zim_get_metadata_string(zim->archive, "Language");
     meta.source_lang = lang;
 
+    // Icon
+    uint32_t icon_index;
+    czim_entry *icon_entry = czim_archive_get_illustration(zim->archive, 48, &icon_index);
+    if (!icon_entry) icon_entry = czim_archive_find_favicon(zim->archive, &icon_index);
+    if (icon_entry) {
+        czim_blob icon_blob = czim_archive_get_blob(zim->archive, icon_entry);
+        czim_entry_free(icon_entry);
+        if (czim_blob_data(&icon_blob) && czim_blob_size(&icon_blob) > 0) {
+            meta.icon_data = malloc(czim_blob_size(&icon_blob));
+            if (meta.icon_data) {
+                memcpy(meta.icon_data, czim_blob_data(&icon_blob), czim_blob_size(&icon_blob));
+                meta.icon_size = czim_blob_size(&icon_blob);
+                meta.icon_mime_type = strdup(ud_detect_image_mime(czim_blob_data(&icon_blob), czim_blob_size(&icon_blob)));
+            }
+        }
+        czim_blob_free(&icon_blob);
+    }
+
     char *meta_xml = unidict_info_to_xml(&meta);
     free(title);
     free(desc);
     free(creator);
     free(date);
     free(lang);
+    free(meta.icon_data);
+    free(meta.icon_mime_type);
 
     udx_db_builder *builder = NULL;
     if (meta_xml) {
@@ -1078,7 +1104,7 @@ static unidict_status ud_zim_index_external_make(unidict *dict, unidict_index_ex
             if (pct > 100) pct = 100;
             if (pct > last_pct) {
                 last_pct = pct;
-                if (!callback(dict, UNIDICT_INDEX_STAGE_ARTICLES, pct, user_data)) {
+                if (!callback(dict, pct, user_data)) {
                     udx_db_builder_finalize(builder);
                     udx_writer_close(writer);
                     ret = UNIDICT_ERR_CANCELLED;
@@ -1098,6 +1124,9 @@ static unidict_status ud_zim_index_external_make(unidict *dict, unidict_index_ex
     if (err != UDX_OK) goto fail;
 
     free(udx_path);
+    if (callback && last_pct < 100) {
+        callback(dict, 100, user_data);
+    }
     dict->has_external_index = true;
     return UNIDICT_OK;
 
@@ -1150,8 +1179,28 @@ static unidict_status ud_zim_file_infos_get(unidict *dict, unidict_file_info_arr
         *out_infos = NULL;
         return UNIDICT_ERR_INVALID_PARAM;
     }
-    const char *paths[] = {path};
-    *out_infos = unidict_file_infos_from_paths(paths, 1);
+
+    // Derive .udx path and check if it exists on disk
+    char *udx_path = NULL;
+    if (zim->zim_path) {
+        udx_path = zim_get_udx_path(zim->zim_path);
+        if (udx_path) {
+            struct stat udx_st;
+            if (stat(udx_path, &udx_st) != 0) {
+                free(udx_path);
+                udx_path = NULL;
+            }
+        }
+    }
+
+    const char *paths[2];
+    int count = 0;
+    paths[count++] = path;
+    if (udx_path) paths[count++] = udx_path;
+
+    *out_infos = unidict_file_infos_from_paths(paths, count);
+    free(udx_path);
+
     return UNIDICT_OK;
 }
 

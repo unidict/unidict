@@ -8,6 +8,7 @@
 #include "unidict_internal.h"
 #include "cmdx_reader.h"
 #include "cmdx_key_section.h"
+#include "cmdx_util.h"
 #include "udx_writer.h"
 #include "ud_udx.h"
 #include <stdlib.h>
@@ -500,6 +501,7 @@ static unidict_status mdict_entry_lookup(unidict *dict, const char *key, unidict
         }
 
         entry_info->key = strdup(cmdx_key_entry_get_key(entry));
+
         entry_info->internal_entry = &wrapper->obj;
         res->items[i] = entry_info;
     }
@@ -593,6 +595,17 @@ static unidict_status mdict_suggest(unidict *dict, const char *prefix, size_t li
     ud_mdict *mdict = uobject_cast(&dict->obj, ud_mdict, base.obj);
 
     size_t count = limit > 0 ? limit : 100;
+
+    // UDX mode: delegate directly to UDX, fetch will handle value unpacking
+    if (mdict->udx_dict) {
+        if (!mdict->udx_dict->ops->suggest) {
+            *out_entries = NULL;
+            return UNIDICT_ERR_NOT_SUPPORTED;
+        }
+        return mdict->udx_dict->ops->suggest(mdict->udx_dict, prefix, count, out_entries);
+    }
+
+    // Builtin mode: use cmdx key blocks
     cmdx_key_entry_list *key_list = cmdx_get_key_entries_by_key(mdict->mdx_reader, (char *)prefix, count, true);
 
     if (!key_list || key_list->count == 0) {
@@ -631,6 +644,7 @@ static unidict_status mdict_suggest(unidict *dict, const char *prefix, size_t li
         }
 
         entry_info->key = strdup(cmdx_key_entry_get_key(entry));
+
         entry_info->internal_entry = &wrapper->obj;
 
         res->items[i] = entry_info;
@@ -642,59 +656,108 @@ static unidict_status mdict_suggest(unidict *dict, const char *prefix, size_t li
     return UNIDICT_OK;
 }
 
+/*
+ * Fetch article content for a dictionary entry.
+ *
+ * In builtin-index mode, one entry corresponds to exactly one article (key block
+ * offset → single article body). In UDX-index mode, one entry may contain
+ * multiple value items (each storing a packed offset+size ref), and each valid
+ * ref yields one article — so a single entry can produce multiple articles.
+ */
 static unidict_status mdict_fetch(unidict *dict, unidict_entry *entry, unidict_article_array **out_articles) {
     if (!dict || !entry || !entry->internal_entry) {
         *out_articles = NULL;
         return UNIDICT_ERR_INVALID_PARAM;
     }
     ud_mdict *mdict = uobject_cast(&dict->obj, ud_mdict, base.obj);
+    cmdx_encoding enc = cmdx_reader_get_meta(mdict->mdx_reader)->encoding;
 
-    cmdx_data *record = NULL;
+    unidict_article_array *articles = malloc(sizeof(unidict_article_array));
+    if (!articles) {
+        *out_articles = NULL;
+        return UNIDICT_ERR_NOMEM;
+    }
+    articles->items = NULL;
+    articles->count = 0;
 
     if (mdict->udx_dict) {
-        // UDX mode: use offset + size
-        ud_mdict_article_entry *ref = uobject_cast(entry->internal_entry, ud_mdict_article_entry, obj);
-        if (ref->content_size > 0) {
-            record = cmdx_get_content_by_offset(mdict->mdx_reader, ref->content_offset, ref->content_size);
+        // UDX mode: entry comes from UDX suggest/iterator, fetch raw value and unpack refs
+        udx_db_value_entry *ve = ud_udx_raw_fetch(mdict->udx_dict, entry);
+        if (!ve || ve->items.count == 0) {
+            if (ve) udx_db_value_entry_free(ve);
+            free(articles);
+            *out_articles = NULL;
+            return UNIDICT_OK;
         }
+
+        // Allocate for the maximum possible articles (= value item count)
+        articles->items = calloc(ve->items.count, sizeof(unidict_article));
+        if (!articles->items) {
+            udx_db_value_entry_free(ve);
+            free(articles);
+            *out_articles = NULL;
+            return UNIDICT_ERR_NOMEM;
+        }
+
+        for (size_t vi = 0; vi < ve->items.count; vi++) {
+            ud_mdict_article_entry *ref = mdict_article_entry_from_udx_value(&ve->items.elements[vi]);
+            if (!ref || ref->content_size == 0) {
+                if (ref) uobject_release(&ref->obj);
+                continue;
+            }
+            cmdx_data *record = cmdx_get_content_by_offset(mdict->mdx_reader, ref->content_offset, ref->content_size);
+            uobject_release(&ref->obj);
+            if (!record || !record->data) continue;
+
+            char *body = cmdx_data_to_utf8(record->data, record->length, enc);
+            cmdx_data_free_shallow(record);
+            if (!body) continue;
+
+            articles->items[articles->count].title = ve->items.elements[vi].original_key
+                ? strdup(ve->items.elements[vi].original_key) : NULL;
+            articles->items[articles->count].body = body;
+            articles->count++;
+        }
+        udx_db_value_entry_free(ve);
     } else {
-        // Builtin mode: use cmdx key entry
+        // Builtin mode: one entry corresponds to exactly one article
         ud_cmdx_key_entry *wrapper = uobject_cast(entry->internal_entry, ud_cmdx_key_entry, obj);
-        record = cmdx_get_content_record_by_key_entry(mdict->mdx_reader, wrapper->entry);
+        cmdx_data *record = cmdx_get_content_record_by_key_entry(mdict->mdx_reader, wrapper->entry);
+        if (!record || !record->data) {
+            free(articles);
+            *out_articles = NULL;
+            return UNIDICT_OK;
+        }
+
+        char *body = cmdx_data_to_utf8(record->data, record->length, enc);
+        cmdx_data_free_shallow(record);
+        if (!body) {
+            free(articles);
+            *out_articles = NULL;
+            return UNIDICT_ERR_NOMEM;
+        }
+
+        articles->items = malloc(sizeof(unidict_article));
+        if (!articles->items) {
+            free(body);
+            free(articles);
+            *out_articles = NULL;
+            return UNIDICT_ERR_NOMEM;
+        }
+
+        articles->items[0].title = strdup(wrapper->entry->key);
+        articles->items[0].body = body;
+        articles->count = 1;
     }
-    if (!record || !record->data) {
+
+    if (articles->count == 0) {
+        free(articles->items);
+        free(articles);
         *out_articles = NULL;
         return UNIDICT_OK;
     }
 
-    cmdx_encoding enc = cmdx_reader_get_meta(mdict->mdx_reader)->encoding;
-    char *body = cmdx_data_to_utf8(record->data, record->length, enc);
-    cmdx_data_free_shallow(record);
-
-    if (!body) {
-        *out_articles = NULL;
-        return UNIDICT_ERR_NOMEM;
-    }
-
-    unidict_article_array *res = malloc(sizeof(unidict_article_array));
-    if (!res) {
-        free(body);
-        *out_articles = NULL;
-        return UNIDICT_ERR_NOMEM;
-    }
-
-    res->items = calloc(1, sizeof(unidict_article));
-    if (!res->items) {
-        free(res);
-        free(body);
-        *out_articles = NULL;
-        return UNIDICT_ERR_NOMEM;
-    }
-
-    res->items[0].title = NULL;
-    res->items[0].body = body;
-    res->count = 1;
-    *out_articles = res;
+    *out_articles = articles;
     return UNIDICT_OK;
 }
 
@@ -715,24 +778,39 @@ static unidict_status mdict_file_infos_get(unidict *dict, unidict_file_info_arra
 
     ud_file_list *mdd_list = ud_get_mdd_paths_for_mdx(mdict->mdx_path);
     int mdd_count = mdd_list ? (int)mdd_list->count : 0;
-    int total = 1 + mdd_count;
+
+    // Check if the external index (.udx) file exists on disk
+    char *udx_path = mdict_get_udx_path(mdict->mdx_path);
+    int udx_count = 0;
+    if (udx_path) {
+        struct stat udx_st;
+        if (stat(udx_path, &udx_st) == 0) udx_count = 1;
+    }
+
+    int total = 1 + mdd_count + udx_count;
 
     const char **paths = malloc(total * sizeof(const char *));
     if (!paths) {
         if (mdd_list) ud_file_list_free(mdd_list);
+        free(udx_path);
         *out_infos = NULL;
         return UNIDICT_ERR_NOMEM;
     }
 
-    paths[0] = mdict->mdx_path;
+    int idx = 0;
+    paths[idx++] = mdict->mdx_path;
     for (int i = 0; i < mdd_count; i++) {
-        paths[1 + i] = mdd_list->paths[i];
+        paths[idx++] = mdd_list->paths[i];
+    }
+    if (udx_count > 0) {
+        paths[idx++] = udx_path;
     }
 
     unidict_file_info_array *res = unidict_file_infos_from_paths(paths, total);
 
     free(paths);
     if (mdd_list) ud_file_list_free(mdd_list);
+    free(udx_path);
 
     *out_infos = res;
     return UNIDICT_OK;
@@ -799,6 +877,12 @@ static unidict_status mdict_index_external_make(unidict *dict, unidict_index_ext
     int last_pct = 0;
     uint64_t total_keys = cmdx_reader_get_key_count(mdict->mdx_reader);
 
+    // Pre-compute resource total for unified progress denominator
+    uint64_t res_total_pre = 0;
+    for (int i = 0; i < mdict->mdd_reader_count; i++)
+        res_total_pre += cmdx_reader_get_key_count(mdict->mdd_readers[i]);
+    uint64_t grand_total = total_keys + res_total_pre;
+
     // Build article db from MDX
     udx_db_builder *art_builder = udx_db_builder_create(writer, "article");
     if (!art_builder) {
@@ -817,20 +901,18 @@ static unidict_status mdict_index_external_make(unidict *dict, unidict_index_ext
         cmdx_key_entry *ke = cmdx_iter_current(cmdx_iter);
         if (!ke || !ke->key || ke->key[0] == '\0') continue;
 
-        uint64_t content_size = ke->next ? (ke->next->content_logical_offset - ke->content_logical_offset)
-                                         : 0; // last entry: size unknown, will be handled in fetch
+        uint64_t content_size = cmdx_get_content_size_for_entry(mdict->mdx_reader, ke);
 
         uint8_t ref[16];
         mdict_pack_article_ref(ke->content_logical_offset, content_size, ref);
         udx_db_builder_add_entry(art_builder, ke->key, ref, 16);
         entry_count++;
 
-        if (callback && total_keys > 0 && (entry_count % 500) == 0) {
-            int pct = (int)((uint64_t)entry_count * 50 / total_keys);
-            if (pct > 50) pct = 50;
+        if (callback && grand_total > 0 && (entry_count % 500) == 0) {
+            int pct = (int)((uint64_t)entry_count * 100 / grand_total);
             if (pct > last_pct) {
                 last_pct = pct;
-                if (!callback(dict, UNIDICT_INDEX_STAGE_ARTICLES, pct, user_data)) {
+                if (!callback(dict, pct, user_data)) {
                     cmdx_iter_free(cmdx_iter);
                     udx_db_builder_finalize(art_builder);
                     udx_writer_close(writer);
@@ -858,10 +940,7 @@ static unidict_status mdict_index_external_make(unidict *dict, unidict_index_ext
         }
 
         int res_count = 0;
-        uint64_t res_total = 0;
-        for (int i = 0; i < mdict->mdd_reader_count; i++) {
-            res_total += cmdx_reader_get_key_count(mdict->mdd_readers[i]);
-        }
+        uint64_t res_total = res_total_pre;
 
         for (int i = 0; i < mdict->mdd_reader_count; i++) {
             cmdx_entry_iter *mdd_iter = cmdx_reader_iter_create(mdict->mdd_readers[i]);
@@ -871,19 +950,18 @@ static unidict_status mdict_index_external_make(unidict *dict, unidict_index_ext
                 cmdx_key_entry *ke = cmdx_iter_current(mdd_iter);
                 if (!ke || !ke->key || ke->key[0] == '\0') continue;
 
-                uint64_t content_size = ke->next ? (ke->next->content_logical_offset - ke->content_logical_offset) : 0;
+                uint64_t content_size = cmdx_get_content_size_for_entry(mdict->mdd_readers[i], ke);
 
                 uint8_t ref[20];
                 mdict_pack_resource_ref(i, ke->content_logical_offset, content_size, ref);
                 udx_db_builder_add_entry(res_builder, ke->key, ref, 20);
                 res_count++;
 
-                if (callback && res_total > 0 && (res_count % 500) == 0) {
-                    int pct = 50 + (int)((uint64_t)res_count * 50 / res_total);
-                    if (pct > 100) pct = 100;
+                if (callback && grand_total > 0 && (res_count % 500) == 0) {
+                    int pct = (int)((uint64_t)(entry_count + res_count) * 100 / grand_total);
                     if (pct > last_pct) {
                         last_pct = pct;
-                        if (!callback(dict, UNIDICT_INDEX_STAGE_RESOURCES, pct, user_data)) {
+                        if (!callback(dict, pct, user_data)) {
                             cmdx_iter_free(mdd_iter);
                             udx_db_builder_finalize(res_builder);
                             udx_writer_close(writer);
@@ -912,6 +990,9 @@ static unidict_status mdict_index_external_make(unidict *dict, unidict_index_ext
 
     free(udx_path);
     dict->has_external_index = true;
+    if (callback && last_pct < 100) {
+        callback(dict, 100, user_data);
+    }
     return UNIDICT_OK;
 
 fail:
@@ -1019,22 +1100,10 @@ static unidict_status mdict_entry_iter_next(unidict_entry_iter *iter, unidict_en
             return UNIDICT_DONE;
         }
 
-        udx_db_value_entry *ve = ud_udx_raw_fetch(mdict->udx_dict, udx_entry);
-        if (!ve || ve->items.count == 0 || !ve->items.elements[0].data) {
-            if (ve) udx_db_value_entry_free(ve);
-            *out_entry = NULL;
-            return UNIDICT_DONE;
-        }
-
-        ud_mdict_article_entry *ref = mdict_article_entry_from_udx_value(&ve->items.elements[0]);
-        udx_db_value_entry_free(ve);
-        if (!ref) {
-            *out_entry = NULL;
-            return UNIDICT_DONE;
-        }
-
+        // Pass through UDX entry directly — mdict_fetch will handle raw_fetch + unpack
         iter->current.key = strdup(udx_entry->key);
-        iter->current.internal_entry = &ref->obj;
+        iter->current.internal_entry = udx_entry->internal_entry;
+        uobject_retain(iter->current.internal_entry);
         *out_entry = &iter->current;
         return UNIDICT_OK;
     }
@@ -1063,6 +1132,7 @@ static unidict_status mdict_entry_iter_next(unidict_entry_iter *iter, unidict_en
     }
 
     iter->current.key = strdup(cmdx_key_entry_get_key(ke));
+
     iter->current.internal_entry = &wrapper->obj;
     *out_entry = &iter->current;
     return UNIDICT_OK;
@@ -1086,6 +1156,26 @@ static void mdict_entry_iter_free(unidict_entry_iter *iter) {
 // Resource get
 // ============================================================
 
+/*
+ * Normalize a resource key to MDD's Windows-path form (backslash separator,
+ * leading backslash). Caller must free the returned string.
+ */
+static char *mdict_normalize_resource_key(const char *name) {
+    if (!name) return NULL;
+    size_t len = strlen(name);
+    size_t need_leading = (len == 0 || name[0] != '\\') ? 1 : 0;
+    char *normalized = malloc(len + need_leading + 1);
+    if (!normalized) return NULL;
+
+    char *dst = normalized;
+    if (need_leading) *dst++ = '\\';
+    for (size_t i = 0; i < len; i++) {
+        *dst++ = (name[i] == '/') ? '\\' : name[i];
+    }
+    *dst = '\0';
+    return normalized;
+}
+
 static unidict_status mdict_resource_get(unidict *dict, const char *key, unidict_resource **out_res) {
     if (!dict || !key || !out_res) {
         if (out_res) *out_res = NULL;
@@ -1095,9 +1185,13 @@ static unidict_status mdict_resource_get(unidict *dict, const char *key, unidict
     *out_res = NULL;
     ud_mdict *mdict = uobject_cast(&dict->obj, ud_mdict, base.obj);
 
+    // Normalize key to MDD Windows-path form
+    char *mdd_key = mdict_normalize_resource_key(key);
+    if (!mdd_key) return UNIDICT_ERR_NOMEM;
+
     // UDX mode: lookup in resource db
     if (mdict->udx_dict) {
-        udx_db_value_entry *ve = ud_udx_raw_resource_get(mdict->udx_dict, key);
+        udx_db_value_entry *ve = ud_udx_raw_resource_get(mdict->udx_dict, mdd_key);
         if (ve && ve->items.count > 0) {
             int mdd_idx = 0;
             uint64_t offset = 0;
@@ -1105,50 +1199,57 @@ static unidict_status mdict_resource_get(unidict *dict, const char *key, unidict
             mdict_unpack_resource_ref(ve->items.elements[0].data, ve->items.elements[0].size, &mdd_idx, &offset, &size);
             udx_db_value_entry_free(ve);
 
-            if (mdd_idx < 0 || mdd_idx >= mdict->mdd_reader_count || size == 0) return UNIDICT_OK;
+            if (mdd_idx < 0 || mdd_idx >= mdict->mdd_reader_count || size == 0) { free(mdd_key); return UNIDICT_OK; }
 
             cmdx_data *record = cmdx_get_content_by_offset(mdict->mdd_readers[mdd_idx], offset, size);
             if (record && record->data) {
                 unidict_resource *res = calloc(1, sizeof(unidict_resource));
                 if (!res) {
                     cmdx_data_free_shallow(record);
+                    free(mdd_key);
                     return UNIDICT_ERR_NOMEM;
                 }
-                res->key = strdup(key);
+                res->key = strdup(mdd_key);
                 res->data = record->data;
                 res->size = record->length;
                 record->data = NULL;
                 cmdx_data_free_shallow(record);
+                free(mdd_key);
                 *out_res = res;
                 return UNIDICT_OK;
             }
             if (record) cmdx_data_free_shallow(record);
+            free(mdd_key);
             return UNIDICT_OK;
         }
+        free(mdd_key);
         return UNIDICT_OK;
     }
 
     // Builtin mode: search each MDD
     for (int i = 0; i < mdict->mdd_reader_count; i++) {
-        cmdx_data_list *list = cmdx_get_content_records_by_key(mdict->mdd_readers[i], (char *)key, 1, false);
+        cmdx_data_list *list = cmdx_get_content_records_by_key(mdict->mdd_readers[i], (char *)mdd_key, 1, false);
         if (list && list->count > 0 && list->items[0] && list->items[0]->data) {
             unidict_resource *res = calloc(1, sizeof(unidict_resource));
             if (!res) {
                 cmdx_data_list_free(list);
+                free(mdd_key);
                 return UNIDICT_ERR_NOMEM;
             }
-            res->key = strdup(key);
+            res->key = strdup(mdd_key);
             res->data = list->items[0]->data;
             res->size = list->items[0]->length;
             list->items[0]->data = NULL;
             list->items[0]->length = 0;
             cmdx_data_list_free(list);
+            free(mdd_key);
             *out_res = res;
             return UNIDICT_OK;
         }
         if (list) cmdx_data_list_free(list);
     }
 
+    free(mdd_key);
     return UNIDICT_OK;
 }
 

@@ -1411,13 +1411,43 @@ static unidict_status epwing_file_infos_get(unidict *dict, unidict_file_info_arr
 
     closedir(dir);
 
-    if (count == 0) {
+    // Derive .udx path and check if it exists on disk
+    char *udx_path = NULL;
+    if (epwing->path) {
+        size_t len = strlen(epwing->path);
+        while (len > 1 && epwing->path[len - 1] == '/') len--;
+        udx_path = malloc(len + 5);
+        if (udx_path) {
+            snprintf(udx_path, len + 5, "%.*s.udx", (int)len, epwing->path);
+            struct stat udx_st;
+            if (stat(udx_path, &udx_st) != 0) {
+                free(udx_path);
+                udx_path = NULL;
+            }
+        }
+    }
+
+    if (count == 0 && udx_path == NULL) {
         free(paths);
         return UNIDICT_OK;
     }
 
+    // Append udx path to the paths array if present
+    if (udx_path) {
+        if ((size_t)count >= capacity) {
+            char **new_paths = realloc(paths, (capacity + 1) * sizeof(char *));
+            if (new_paths) {
+                paths = new_paths;
+                paths[count++] = udx_path;
+            }
+        } else {
+            paths[count++] = udx_path;
+        }
+    }
+
     *out_infos = unidict_file_infos_from_paths((const char **)paths, count);
 
+    // Free the dir-scanned paths and udx_path; unidict_file_infos_from_paths strdups them
     for (int i = 0; i < count; i++) free(paths[i]);
     free(paths);
 
@@ -1580,7 +1610,7 @@ static unidict_status epwing_index_external_make(unidict *dict, unidict_index_ex
             if (pct > 100) pct = 100;
             if (pct > last_pct) {
                 last_pct = pct;
-                if (!callback(dict, UNIDICT_INDEX_STAGE_ARTICLES, pct, user_data)) {
+                if (!callback(dict, pct, user_data)) {
                     udx_db_builder_finalize(builder);
                     udx_writer_close(writer);
                     free(udx_path);
@@ -1603,7 +1633,13 @@ static unidict_status epwing_index_external_make(unidict *dict, unidict_index_ex
 
     err = udx_writer_close(writer);
     free(udx_path);
-    return err == UDX_OK ? UNIDICT_OK : UNIDICT_ERR_IO;
+    if (err == UDX_OK) {
+        if (callback && last_pct < 100) {
+            callback(dict, 100, user_data);
+        }
+        return UNIDICT_OK;
+    }
+    return UNIDICT_ERR_IO;
 }
 
 // ============================================================

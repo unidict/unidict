@@ -10,6 +10,7 @@
 #include "lsd_utils.h"
 #include "udx_writer.h"
 #include "ud_udx.h"
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -309,19 +310,26 @@ static unidict_status lingvo_file_infos_get(unidict *dict, unidict_file_info_arr
     }
     ud_lingvo *lingvo = uobject_cast(&dict->obj, ud_lingvo, base.obj);
 
-    unidict_file_info_array *udx_infos = NULL;
-    if (lingvo->udx_dict) {
-        if (lingvo->udx_dict->ops->file_infos_get)
-            lingvo->udx_dict->ops->file_infos_get(lingvo->udx_dict, &udx_infos);
+    // Derive .udx path and check if it exists on disk
+    char *udx_path = NULL;
+    if (lingvo->lsd_path) {
+        udx_path = lingvo_get_udx_path(lingvo->lsd_path);
+        if (udx_path) {
+            struct stat udx_st;
+            if (stat(udx_path, &udx_st) != 0) {
+                free(udx_path);
+                udx_path = NULL;
+            }
+        }
     }
 
     const char *paths[2];
     int count = 0;
     if (lingvo->lsd_path) paths[count++] = lingvo->lsd_path;
-    if (udx_infos && udx_infos->count > 0) paths[count++] = udx_infos->items[0].path;
+    if (udx_path) paths[count++] = udx_path;
 
     *out_infos = unidict_file_infos_from_paths(paths, count);
-    if (udx_infos) unidict_file_info_array_free(udx_infos);
+    free(udx_path);
 
     return *out_infos ? UNIDICT_OK : UNIDICT_ERR_NOMEM;
 }
@@ -461,7 +469,7 @@ static unidict_status lingvo_index_external_make(unidict *dict, unidict_index_ex
             if (pct > 100) pct = 100;
             if (pct > last_pct) {
                 last_pct = pct;
-                if (!callback(dict, UNIDICT_INDEX_STAGE_ARTICLES, pct, user_data)) {
+                if (!callback(dict, pct, user_data)) {
                     lsd_heading_iter_destroy(iter);
                     udx_db_builder_finalize(builder);
                     udx_writer_close(writer);
@@ -488,6 +496,9 @@ static unidict_status lingvo_index_external_make(unidict *dict, unidict_index_ex
     }
 
     free(udx_path);
+    if (callback && last_pct < 100) {
+        callback(dict, 100, user_data);
+    }
     dict->has_external_index = true;
     return UNIDICT_OK;
 

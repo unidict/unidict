@@ -8,6 +8,7 @@
 #include "unidict_internal.h"
 #include "unidict_log.h"
 #include "ud_udx.h"
+#include <sys/stat.h>
 #include "ud_mime.h"
 #include "udx_writer.h"
 #include "ldx_reader.h"
@@ -281,20 +282,31 @@ static unidict_status lingoes_file_infos_get(unidict *dict, unidict_file_info_ar
 
     ud_lingoes *lingoes = uobject_cast(&dict->obj, ud_lingoes, base.obj);
 
-    unidict_file_info_array *udx_infos = NULL;
-    if (lingoes->udx_dict) {
-        if (lingoes->udx_dict->ops->file_infos_get)
-            lingoes->udx_dict->ops->file_infos_get(lingoes->udx_dict, &udx_infos);
+    // Derive .udx path and check if it exists on disk
+    char *udx_path = NULL;
+    if (lingoes->ldx_path) {
+        const char *ldx_path = lingoes->ldx_path;
+        const char *ext = strrchr(ldx_path, '.');
+        size_t base_len = ext ? (size_t)(ext - ldx_path) : strlen(ldx_path);
+        udx_path = malloc(base_len + 5);
+        if (udx_path) {
+            snprintf(udx_path, base_len + 5, "%.*s.udx", (int)base_len, ldx_path);
+            struct stat udx_st;
+            if (stat(udx_path, &udx_st) != 0) {
+                free(udx_path);
+                udx_path = NULL;
+            }
+        }
     }
 
     const char *paths[2];
     int count = 0;
 
     if (lingoes->ldx_path) paths[count++] = lingoes->ldx_path;
-    if (udx_infos && udx_infos->count > 0) paths[count++] = udx_infos->items[0].path;
+    if (udx_path) paths[count++] = udx_path;
 
     *out_infos = unidict_file_infos_from_paths(paths, count);
-    if (udx_infos) unidict_file_info_array_free(udx_infos);
+    free(udx_path);
 
     return UNIDICT_OK;
 }
@@ -448,6 +460,8 @@ static unidict_status lingoes_index_external_make(unidict *dict, unidict_index_e
     int entry_count = 0;
     int error_count = 0;
     int total_entries = (int)ldx_reader_get_info(reader)->gls_count;
+    int resource_count_pre = ldx_reader_res_count(reader);
+    int grand_total = total_entries + resource_count_pre;
     int last_pct = 0;
 
     UD_LOG_INFO("Reading entries from LD2 file...");
@@ -475,11 +489,11 @@ static unidict_status lingoes_index_external_make(unidict *dict, unidict_index_e
 
         entry_count++;
 
-        if (callback && total_entries > 0) {
-            int pct = entry_count * 100 / total_entries;
+        if (callback && grand_total > 0) {
+            int pct = entry_count * 100 / grand_total;
             if (pct > last_pct) {
                 last_pct = pct;
-                if (!callback(dict, UNIDICT_INDEX_STAGE_ARTICLES, pct, user_data)) {
+                if (!callback(dict, pct, user_data)) {
                     ldx_reader_gls_iter_free(iter);
                     udx_db_builder_finalize(builder);
                     udx_writer_close(writer);
@@ -502,7 +516,7 @@ static unidict_status lingoes_index_external_make(unidict *dict, unidict_index_e
     }
 
     // Build resource database
-    int resource_count = ldx_reader_res_count(reader);
+    int resource_count = resource_count_pre;
     if (resource_count > 0) {
         UD_LOG_INFO("Building resource database (%d resources)...", resource_count);
 
@@ -525,7 +539,6 @@ static unidict_status lingoes_index_external_make(unidict *dict, unidict_index_e
 
         const ldx_res_entry *res_entry = NULL;
         int res_added = 0;
-        int res_last_pct = 0;
         while (ldx_reader_res_iter_next(res_iter, &res_entry) == LDX_OK) {
             if (!res_entry->name || !res_entry->data || res_entry->data_size == 0) continue;
 
@@ -543,11 +556,11 @@ static unidict_status lingoes_index_external_make(unidict *dict, unidict_index_e
             }
             res_added++;
 
-            if (callback && resource_count > 0) {
-                int pct = res_added * 100 / resource_count;
-                if (pct > res_last_pct) {
-                    res_last_pct = pct;
-                    if (!callback(dict, UNIDICT_INDEX_STAGE_RESOURCES, pct, user_data)) {
+            if (callback && grand_total > 0) {
+                int pct = (entry_count + res_added) * 100 / grand_total;
+                if (pct > last_pct) {
+                    last_pct = pct;
+                    if (!callback(dict, pct, user_data)) {
                         ldx_reader_res_iter_free(res_iter);
                         udx_db_builder_finalize(res_builder);
                         udx_writer_close(writer);
@@ -580,6 +593,9 @@ static unidict_status lingoes_index_external_make(unidict *dict, unidict_index_e
 
     free(udx_path);
     dict->has_external_index = true;
+    if (callback && last_pct < 100) {
+        callback(dict, 100, user_data);
+    }
     return UNIDICT_OK;
 
 fail:

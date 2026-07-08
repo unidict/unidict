@@ -8,6 +8,7 @@
 #include "unidict_internal.h"
 #include "unidict_log.h"
 #include "ud_udx.h"
+#include <sys/stat.h>
 #include "dsl_reader.h"
 #include "udx_writer.h"
 #include <stdlib.h>
@@ -375,20 +376,27 @@ static unidict_status ud_lingvo_dsl_file_infos_get(unidict *dict, unidict_file_i
     }
     ud_lingvo_dsl *dsl = uobject_cast(&dict->obj, ud_lingvo_dsl, base.obj);
 
-    unidict_file_info_array *udx_infos = NULL;
-    if (dsl->udx_dict) {
-        if (dsl->udx_dict->ops->file_infos_get) dsl->udx_dict->ops->file_infos_get(dsl->udx_dict, &udx_infos);
+    // Derive .udx path and check if it exists on disk
+    char *udx_path = NULL;
+    if (dsl->dsl_path) {
+        udx_path = dsl_get_udx_path(dsl->dsl_path);
+        if (udx_path) {
+            struct stat udx_st;
+            if (stat(udx_path, &udx_st) != 0) {
+                free(udx_path);
+                udx_path = NULL;
+            }
+        }
     }
 
-    int udx_count = udx_infos ? (int)udx_infos->count : 0;
     const char *paths[2];
     int count = 0;
 
     if (dsl->dsl_path) paths[count++] = dsl->dsl_path;
-    if (udx_infos && udx_count > 0) paths[count++] = udx_infos->items[0].path;
+    if (udx_path) paths[count++] = udx_path;
 
     *out_infos = unidict_file_infos_from_paths(paths, count);
-    if (udx_infos) unidict_file_info_array_free(udx_infos);
+    free(udx_path);
 
     return *out_infos ? UNIDICT_OK : UNIDICT_ERR_NOMEM;
 }
@@ -492,7 +500,7 @@ static unidict_status ud_lingvo_dsl_index_external_make(unidict *dict, unidict_i
             if (pct > 100) pct = 100;
             if (pct > last_pct) {
                 last_pct = pct;
-                if (!callback(dict, UNIDICT_INDEX_STAGE_ARTICLES, pct, user_data)) {
+                if (!callback(dict, pct, user_data)) {
                     dsl_article_iter_destroy(iter);
                     udx_db_builder_finalize(builder);
                     udx_writer_close(writer);
@@ -521,6 +529,9 @@ static unidict_status ud_lingvo_dsl_index_external_make(unidict *dict, unidict_i
     }
 
     free(udx_path);
+    if (callback && last_pct < 100) {
+        callback(dict, 100, user_data);
+    }
     dict->has_external_index = true;
     return UNIDICT_OK;
 

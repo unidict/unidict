@@ -8,6 +8,7 @@
 #include "unidict_internal.h"
 #include "unidict_log.h"
 #include "ud_udx.h"
+#include <sys/stat.h>
 #include "udx_writer.h"
 #include "sd_stardict.h"
 #include "sd_dictfile_index.h"
@@ -158,10 +159,17 @@ static unidict_status ud_stardict_file_infos_get(unidict *dict, unidict_file_inf
     }
     ud_stardict *stardict = uobject_cast(&dict->obj, ud_stardict, base.obj);
 
-    unidict_file_info_array *udx_infos = NULL;
-    if (stardict->udx_dict) {
-        if (stardict->udx_dict->ops->file_infos_get)
-            stardict->udx_dict->ops->file_infos_get(stardict->udx_dict, &udx_infos);
+    // Derive .udx path and check if it exists on disk
+    char *udx_path = NULL;
+    if (stardict->ifo_path) {
+        udx_path = ud_stardict_get_udx_path(stardict->ifo_path);
+        if (udx_path) {
+            struct stat udx_st;
+            if (stat(udx_path, &udx_st) != 0) {
+                free(udx_path);
+                udx_path = NULL;
+            }
+        }
     }
 
     const char *file_paths[5];
@@ -174,10 +182,10 @@ static unidict_status ud_stardict_file_infos_get(unidict *dict, unidict_file_inf
         if (paths.dict_path) file_paths[count++] = paths.dict_path;
         if (paths.syn_path) file_paths[count++] = paths.syn_path;
     }
-    if (udx_infos && udx_infos->count > 0) file_paths[count++] = udx_infos->items[0].path;
+    if (udx_path) file_paths[count++] = udx_path;
 
     *out_infos = unidict_file_infos_from_paths(file_paths, count);
-    if (udx_infos) unidict_file_info_array_free(udx_infos);
+    free(udx_path);
 
     return UNIDICT_OK;
 }
@@ -367,7 +375,7 @@ static unidict_status ud_stardict_index_external_make(unidict *dict, unidict_ind
             int pct = (int)((uint64_t)(i + 1) * 100 / total);
             if (pct > last_pct) {
                 last_pct = pct;
-                if (!callback(dict, UNIDICT_INDEX_STAGE_ARTICLES, pct, user_data)) {
+                if (!callback(dict, pct, user_data)) {
                     udx_db_builder_finalize(builder);
                     udx_writer_close(writer);
                     ret = UNIDICT_ERR_CANCELLED;
@@ -387,6 +395,9 @@ static unidict_status ud_stardict_index_external_make(unidict *dict, unidict_ind
     if (err != UDX_OK) goto fail;
 
     free(udx_path);
+    if (callback && last_pct < 100) {
+        callback(dict, 100, user_data);
+    }
     dict->has_external_index = true;
     return UNIDICT_OK;
 

@@ -268,27 +268,23 @@ unidict_status unidict_index_activate(unidict *dict, unidict_index_type index_ty
 bool unidict_index_has_builtin(unidict *dict);
 bool unidict_index_has_external(unidict *dict);
 
-typedef enum {
-    UNIDICT_INDEX_STAGE_ARTICLES,
-    UNIDICT_INDEX_STAGE_RESOURCES,
-} unidict_index_stage;
-
 // Returns true to continue, false to cancel.
 // When cancelled, unidict_index_external_make returns UNIDICT_ERR_CANCELLED.
 // Called on the same thread as unidict_index_external_make.
+// percent is a unified 0-100 progress value across all phases (articles + resources).
 // Only called for slow stages with meaningful progress; fast stages are skipped.
 //
 // To cancel from another thread, use an atomic flag in user_data:
 //
 //   typedef struct { atomic_bool cancel; } build_ctx;
 //
-//   bool my_cb(unidict *d, unidict_index_stage s, int pct, void *ud) {
+//   bool my_cb(unidict *d, int pct, void *ud) {
 //       return !atomic_load(&((build_ctx *)ud)->cancel);
 //   }
 //
 //   // From another thread:
 //   atomic_store(&ctx.cancel, true);
-typedef bool (*unidict_index_external_make_cb)(unidict *dict, unidict_index_stage stage, int percent, void *user_data);
+typedef bool (*unidict_index_external_make_cb)(unidict *dict, int percent, void *user_data);
 
 // Build an external index for faster lookups. Progress is reported via callback.
 // After success, call unidict_index_activate(dict, EXTERNAL) to load the new index.

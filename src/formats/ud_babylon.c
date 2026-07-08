@@ -8,6 +8,7 @@
 #include "unidict_internal.h"
 #include "unidict_log.h"
 #include "ud_udx.h"
+#include <sys/stat.h>
 #include "ud_mime.h"
 #include "bgl_reader.h"
 #include "bgl_definition.h"
@@ -439,22 +440,30 @@ static unidict_status ud_babylon_file_infos_get(unidict *dict, unidict_file_info
     }
     ud_babylon *babylon = uobject_cast(&dict->obj, ud_babylon, base.obj);
 
-    // Get UDX file list from ud_udx
-    unidict_file_info_array *udx_infos = NULL;
-    if (babylon->udx_dict) {
-        if (babylon->udx_dict->ops->file_infos_get)
-            babylon->udx_dict->ops->file_infos_get(babylon->udx_dict, &udx_infos);
+    // Derive .udx path and check if it exists on disk
+    char *udx_path = NULL;
+    if (babylon->bgl_path) {
+        const char *ext = strrchr(babylon->bgl_path, '.');
+        size_t base_len = ext ? (size_t)(ext - babylon->bgl_path) : strlen(babylon->bgl_path);
+        udx_path = malloc(base_len + 5);
+        if (udx_path) {
+            snprintf(udx_path, base_len + 5, "%.*s.udx", (int)base_len, babylon->bgl_path);
+            struct stat udx_st;
+            if (stat(udx_path, &udx_st) != 0) {
+                free(udx_path);
+                udx_path = NULL;
+            }
+        }
     }
 
-    int udx_count = udx_infos ? (int)udx_infos->count : 0;
     const char *paths[2];
     int count = 0;
 
     if (babylon->bgl_path) paths[count++] = babylon->bgl_path;
-    if (udx_infos && udx_count > 0) paths[count++] = udx_infos->items[0].path;
+    if (udx_path) paths[count++] = udx_path;
 
     *out_infos = unidict_file_infos_from_paths(paths, count);
-    if (udx_infos) unidict_file_info_array_free(udx_infos);
+    free(udx_path);
 
     return *out_infos ? UNIDICT_OK : UNIDICT_ERR_NOMEM;
 }
@@ -577,6 +586,11 @@ static unidict_status ud_babylon_index_external_make(unidict *dict, unidict_inde
     meta.email = bglinfo->email;
     meta.source_lang = bglinfo->source_lang;
     meta.target_lang = bglinfo->target_lang;
+    if (bglinfo->icon && bglinfo->icon_size > 0) {
+        meta.icon_data = bglinfo->icon;
+        meta.icon_size = bglinfo->icon_size;
+        meta.icon_mime_type = ud_detect_image_mime(bglinfo->icon, bglinfo->icon_size);
+    }
     char *meta_xml = unidict_info_to_xml(&meta);
 
     // Create entry database builder (with metadata)
@@ -607,6 +621,8 @@ static unidict_status ud_babylon_index_external_make(unidict *dict, unidict_inde
     int entry_count = 0;
     int error_count = 0;
     int total_entries = bgl_get_entry_count(reader);
+    int resource_count_pre = bgl_get_resource_count(reader);
+    int grand_total = total_entries + resource_count_pre;
     int last_pct = 0;
     int processed = 0;
 
@@ -669,11 +685,11 @@ static unidict_status ud_babylon_index_external_make(unidict *dict, unidict_inde
         free(formatted_def);
 
         processed++;
-        if (callback && total_entries > 0) {
-            int pct = processed * 100 / total_entries;
+        if (callback && grand_total > 0) {
+            int pct = processed * 100 / grand_total;
             if (pct > last_pct) {
                 last_pct = pct;
-                if (!callback(dict, UNIDICT_INDEX_STAGE_ARTICLES, pct, user_data)) {
+                if (!callback(dict, pct, user_data)) {
                     bgl_entry_iterator_free(iter);
                     udx_db_builder_finalize(builder);
                     udx_writer_close(writer);
@@ -698,7 +714,7 @@ static unidict_status ud_babylon_index_external_make(unidict *dict, unidict_inde
     }
 
     // Build resource database
-    int resource_count = bgl_get_resource_count(reader);
+    int resource_count = resource_count_pre;
     if (resource_count > 0) {
         UD_LOG_INFO("Building resource database (%d resources)...", resource_count);
 
@@ -719,7 +735,6 @@ static unidict_status ud_babylon_index_external_make(unidict *dict, unidict_inde
 
         const bgl_resource *res;
         int res_added = 0;
-        int res_last_pct = 0;
         while (bgl_resource_iterator_next(res_iter, &res) == BGL_OK) {
             if (!res->name || !res->data || res->data_size == 0) continue;
 
@@ -735,11 +750,11 @@ static unidict_status ud_babylon_index_external_make(unidict *dict, unidict_inde
                 continue;
             }
             res_added++;
-            if (callback && resource_count > 0) {
-                int pct = res_added * 100 / resource_count;
-                if (pct > res_last_pct) {
-                    res_last_pct = pct;
-                    if (!callback(dict, UNIDICT_INDEX_STAGE_RESOURCES, pct, user_data)) {
+            if (callback && grand_total > 0) {
+                int pct = (processed + res_added) * 100 / grand_total;
+                if (pct > last_pct) {
+                    last_pct = pct;
+                    if (!callback(dict, pct, user_data)) {
                         bgl_resource_iterator_free(res_iter);
                         udx_db_builder_finalize(res_builder);
                         udx_writer_close(writer);
@@ -774,6 +789,9 @@ static unidict_status ud_babylon_index_external_make(unidict *dict, unidict_inde
 
     free(udx_path);
     dict->has_external_index = true;
+    if (callback && last_pct < 100) {
+        callback(dict, 100, user_data);
+    }
     return UNIDICT_OK;
 
 fail:

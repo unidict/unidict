@@ -623,7 +623,7 @@ static unidict_status ud_udx_entry_iter_next(unidict_entry_iter *iter, unidict_e
         iter->current.internal_entry = NULL;
     }
 
-    iter->current.key = strdup(udx_entry->items.elements[0].original_key ? udx_entry->items.elements[0].original_key : "");
+    iter->current.key = strdup(udx_entry->key ? udx_entry->key : "");
     if (!iter->current.key) {
         *out_entry = NULL;
         return UNIDICT_ERR_NOMEM;
